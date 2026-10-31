@@ -1,0 +1,1868 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>S02 FACEIT</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#0A0D12; --surface:#12161D; --surface-2:#181D26; --line:#232A35;
+    --text:#E7ECF3; --text-dim:#8A93A3;
+    --blue:#2F7DFF; --blue-dim:#1C4E9E; --orange:#FF7A1A;
+    --green:#35D07F; --red:#FF4D4D;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    background: radial-gradient(1200px 600px at 50% -10%, #152033 0%, var(--bg) 55%);
+    color:var(--text); font-family:'Inter',sans-serif; margin:0;
+    -webkit-tap-highlight-color:transparent;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .font-display{ font-family:'Rajdhani','Inter',sans-serif; }
+  ::-webkit-scrollbar{ display:none; }
+  .no-scrollbar{ -ms-overflow-style:none; scrollbar-width:none; }
+  @keyframes pulse-ring{ 0%{box-shadow:0 0 0 0 rgba(255,122,26,.45);} 100%{box-shadow:0 0 0 22px rgba(255,122,26,0);} }
+  .pulse{ animation: pulse-ring 1.6s cubic-bezier(.4,0,.6,1) infinite; }
+  @keyframes rise{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:translateY(0);} }
+  .rise{ animation: rise .35s ease-out both; }
+  .skew-tag{ clip-path: polygon(8% 0,100% 0,92% 100%,0 100%); }
+  .banner-pattern{ background-image: repeating-linear-gradient(115deg, rgba(255,255,255,0.035) 0 2px, transparent 2px 18px); }
+</style>
+<script>
+  /* Diagnóstico: se o app não montar (CDN bloqueada, erro de script), mostra o erro na tela em vez de tela preta. */
+  window.addEventListener('error', function(e){
+    var root = document.getElementById('root');
+    if(!root || root.dataset.mounted === '1') return;
+    root.textContent = '';
+    var box = document.createElement('div');
+    box.style.cssText = 'padding:24px;font-family:sans-serif;color:#E7ECF3;max-width:420px;margin:40px auto';
+    var t = document.createElement('p'); t.style.cssText='font-weight:bold;font-size:16px;margin:0 0 8px';
+    t.textContent = 'O app não iniciou';
+    var d = document.createElement('p'); d.style.cssText='color:#FF4D4D;font-size:12px;word-break:break-word;margin:0 0 8px';
+    d.textContent = (e && e.message) ? e.message : 'Erro de script desconhecido';
+    var h = document.createElement('p'); h.style.cssText='color:#8A93A3;font-size:12px;margin:0';
+    h.textContent = 'Verifique a conexão com a internet (React, Babel, Tailwind e Supabase são carregados de CDNs). Abra o console (F12) para detalhes.';
+    box.appendChild(t); box.appendChild(d); box.appendChild(h); root.appendChild(box);
+  });
+</script>
+</head>
+<body>
+<div id="root"><p style="padding:40px;text-align:center;color:#8A93A3;font-family:sans-serif">Carregando S02 FACEIT…</p></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+/* =====================================================================
+   SUPABASE
+   ===================================================================== */
+const SB_URL = "https://ncvjrggjasllevthjyibi.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jdmpyZ2phc2xsZXZ0aGp5aWJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0MjQ2NjgsImV4cCI6MjEwOTAwMDY2OH0._lq7kIUU_UzF7GCyIgvacBB6BEVHjSmXaTg2SdbTsUg";
+const sbLib = window.supabase; // UMD expõe window.supabase (nome da biblioteca, não nossa variável)
+const sb = sbLib ? sbLib.createClient(SB_URL, SB_ANON) : null;
+
+const TABLES = ['profiles','matches','reports','disputes'];
+
+/* Conversão camelCase (app) <-> snake_case (Postgres). pickTimer é só local e nunca vai ao banco. */
+const MAPPERS = {
+  profiles: {
+    to: p => ({ id:p.id, username:p.username, password_hash:p.passwordHash, phone:p.phone, sid:p.sid,
+      role:p.role, karma:p.karma, mmr:p.mmr, history:p.history, avatar_url:p.avatarUrl || '' }),
+    from: r => ({ id:r.id, username:r.username, passwordHash:r.password_hash, phone:r.phone, sid:r.sid,
+      role:r.role, karma:r.karma, mmr:r.mmr, history:r.history || [], createdAt:Date.parse(r.created_at) || 0, avatarUrl:r.avatar_url || '' }),
+  },
+  matches: {
+    to: m => ({ id:m.id, owner_id:m.ownerId, owner_nick:m.ownerNick, phase:m.phase, map:m.map,
+      banned:m.banned, veto_turn:m.vetoTurn, pool:m.pool, team_a:m.teamA, team_b:m.teamB,
+      pick_turn:m.pickTurn, room_link:m.roomLink, result:m.result, player_stats:m.playerStats,
+      dispute_status:m.disputeStatus, annulled:!!m.annulled }),
+    from: r => ({ id:r.id, ownerId:r.owner_id, ownerNick:r.owner_nick, phase:r.phase, map:r.map,
+      banned:r.banned || [], vetoTurn:r.veto_turn, pool:r.pool || [], teamA:r.team_a || [], teamB:r.team_b || [],
+      pickTurn:r.pick_turn, pickTimer:60, roomLink:r.room_link || '', result:r.result, playerStats:r.player_stats,
+      disputeStatus:r.dispute_status, annulled:!!r.annulled, createdAt:Date.parse(r.created_at) || 0 }),
+  },
+  reports: {
+    to: r => ({ id:r.id, reporter:r.reporter, reporter_id:r.reporterId, target_nick:r.targetNick,
+      category:r.category, match_id:r.matchId, status:r.status, created_at:r.createdAt }),
+    from: r => ({ id:r.id, reporter:r.reporter, reporterId:r.reporter_id, targetNick:r.target_nick,
+      category:r.category, matchId:r.match_id, status:r.status, createdAt:r.created_at }),
+  },
+  disputes: {
+    to: d => ({ id:d.id, match_id:d.matchId, user_id:d.userId, username:d.username, status:d.status, created_at:d.createdAt }),
+    from: r => ({ id:r.id, matchId:r.match_id, userId:r.user_id, username:r.username, status:r.status, createdAt:r.created_at }),
+  },
+};
+
+/* JSON com chaves ordenadas: compara registros sem falsos positivos (jsonb reordena chaves) */
+function canon(v){
+  if(v === undefined || v === null) return 'null';
+  if(Array.isArray(v)) return '[' + v.map(canon).join(',') + ']';
+  if(typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + canon(v[k])).join(',') + '}';
+  return JSON.stringify(v);
+}
+
+async function hashPassword(username, password){
+  if(!window.crypto || !window.crypto.subtle) throw new Error('Navegador sem suporte a criptografia (abra por https ou localhost)');
+  const data = new TextEncoder().encode(username.toLowerCase() + '::' + password + '::s02');
+  const buf = await window.crypto.subtle.digest('SHA-256', data);
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function newUuid(){
+  if(window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+  const b = window.crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = [...b].map(x => x.toString(16).padStart(2,'0')).join('');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+}
+
+async function fetchAll(){
+  const results = await Promise.all(TABLES.map(t => sb.from(t).select('*')));
+  const out = {};
+  results.forEach((r, i) => {
+    if(r.error) throw new Error(TABLES[i] + ': ' + r.error.message);
+    out[TABLES[i]] = (r.data || []).map(row => MAPPERS[TABLES[i]].from(row));
+  });
+  return out;
+}
+
+/* =====================================================================
+   MODO DE TRANSIÇÃO: controles de teste visíveis para validar o fluxo.
+   Coloque TEST_MODE = false antes de ir para produção.
+   ===================================================================== */
+const TEST_MODE = true;
+
+/* ---------------- Dados de referência ---------------- */
+
+const MAPS = [
+  { id:'sandstone', name:'Sandstone', img:'linear-gradient(135deg,#3a2a14,#6b4a1e)' },
+  { id:'rust', name:'Rust', img:'linear-gradient(135deg,#2a1810,#6b3a1e)' },
+  { id:'province', name:'Province', img:'linear-gradient(135deg,#1a2a14,#3f5c24)' },
+  { id:'breeze', name:'Breeze', img:'linear-gradient(135deg,#0f1f2a,#1e4a6b)' },
+  { id:'prison', name:'Prison', img:'linear-gradient(135deg,#1a1f24,#3a434d)' },
+  { id:'dune', name:'Dune', img:'linear-gradient(135deg,#3a2f14,#7a5a24)' },
+  { id:'hanami', name:'Hanami', img:'linear-gradient(135deg,#1f0f2a,#5a1e6b)' },
+];
+
+const NICK_POOL = ['Kaze','Volt','Nyx','Rook','Zed','Ashen','Vortex','Blitz','Phantom','Wren'];
+
+const RANKING = [
+  { nick:'ShadowFox', mmr:3120, level:10 },
+  { nick:'Reaper_BR', mmr:2980, level:10 },
+  { nick:'Luna.SZN', mmr:2875, level:9 },
+  { nick:'KratosX', mmr:2790, level:9 },
+  { nick:'NovaBlade', mmr:2715, level:9 },
+];
+
+const CATEGORIES = {
+  toxic:  { label:'Toxidade', penalty:8 },
+  cheat:  { label:'Uso de Cheat/Hack', penalty:20 },
+  afk:    { label:'Ausente/AFK', penalty:6 },
+  noroom: { label:'Não entrou na sala', penalty:6 },
+};
+
+const INPUT = "w-full mt-1 bg-[var(--surface-2)] border border-[var(--line)] rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[var(--blue)]";
+const CARD = "bg-[var(--surface)] border border-[var(--line)] rounded-2xl";
+
+const clamp = (n,a,b) => Math.max(a, Math.min(b, n));
+const rand = (a,b) => a + Math.floor(Math.random()*(b-a+1));
+const shuffle = arr => [...arr].sort(() => Math.random()-0.5);
+const mapName = id => (MAPS.find(m => m.id===id) || {}).name || '—';
+
+/* ---------------- Validação e sanitização ---------------- */
+
+const USER_RE = /^[A-Za-z0-9_]{3,16}$/;
+const SID_RE = /^\d{7,9}$/;
+const PHONE_RE = /^[1-9]{2}(?:9\d{8}|[2-5]\d{7})$/; // DDD + celular (9+8) ou fixo (2–5+7)
+
+function cleanPhone(raw){
+  let d = (raw || '').replace(/\D/g,'');
+  if((d.length===12 || d.length===13) && d.startsWith('55')) d = d.slice(2);
+  return d;
+}
+
+// Aceita apenas https:// ou intent:// com host válido; bloqueia javascript:, data:, espaços etc.
+function isValidRoomLink(v){
+  if(typeof v !== 'string' || v.length > 300 || /\s/.test(v)) return false;
+  try{
+    const u = new URL(v);
+    if(u.protocol === 'https:') return u.hostname.includes('.');
+    if(u.protocol === 'intent:') return !!u.host;
+    return false;
+  } catch(e){ return false; }
+}
+
+function isValidAvatarUrl(v){
+  if(!v) return true;
+  if(v.length > 300 || /\s/.test(v)) return false;
+  try{ return new URL(v).protocol === 'https:'; } catch(e){ return false; }
+}
+
+function validateRegister(f, profiles){
+  const u = f.username.trim();
+  const phone = cleanPhone(f.phone);
+  const sid = f.sid.trim();
+  if(!USER_RE.test(u)) return 'Usuário: 3 a 16 caracteres, apenas letras, números e _';
+  if(profiles.some(p => p.username.toLowerCase()===u.toLowerCase())) return 'Este usuário já existe';
+  if(f.password.length < 6 || f.password.length > 64) return 'Senha: entre 6 e 64 caracteres';
+  if(!PHONE_RE.test(phone)) return 'Telefone inválido: informe DDD + número (ex.: 11 91234 5678)';
+  if(profiles.some(p => p.phone===phone)) return 'Este telefone já está vinculado a outra conta';
+  if(!SID_RE.test(sid)) return 'ID do Standoff 2: somente números, de 7 a 9 dígitos';
+  if(profiles.some(p => p.sid===sid)) return 'Este ID do Standoff 2 já está vinculado a outra conta';
+  return null;
+}
+
+function validateScore(ct, tr){
+  if(!/^\d{1,2}$/.test(ct) || !/^\d{1,2}$/.test(tr)) return 'Informe apenas números inteiros nos dois lados';
+  const a = Number(ct), b = Number(tr);
+  if(Math.max(a,b) !== 13) return 'Um dos lados precisa ter exatamente 13 rodadas';
+  if(Math.min(a,b) > 12) return 'O lado perdedor deve ter entre 0 e 12 rodadas';
+  return null;
+}
+
+function maskPhone(p){ return p ? `(${p.slice(0,2)}) *****-${p.slice(-4)}` : '—'; }
+
+/* ---------------- Regras de negócio ---------------- */
+
+function mmrToLevel(mmr){
+  const t = [0,400,800,1200,1600,2000,2350,2650,2900,3100];
+  let lvl = 1;
+  for(let i=0;i<t.length;i++){ if(mmr>=t[i]) lvl = i+1; }
+  return Math.min(lvl,10);
+}
+
+function calcMmrChange(won, kd){
+  const variance = Math.round((kd-1)*25 + (Math.random()*10-5));
+  return won ? clamp(47+variance, 20, 80) : clamp(-47+variance, -60, -15);
+}
+
+function getStats(p){
+  const h = p.history || [];
+  const wins = h.filter(x => x.result==='win').length;
+  const games = h.length;
+  const kills = h.reduce((a,x) => a+x.kills, 0);
+  const deaths = h.reduce((a,x) => a+x.deaths, 0);
+  const hs = h.reduce((a,x) => a+x.hs, 0);
+  const calibrated = games >= 10;
+  return {
+    wins, losses: games-wins, games,
+    winrate: games ? Math.round(wins/games*100) : 0,
+    kd: deaths ? +(kills/deaths).toFixed(2) : kills,
+    hsPct: kills ? Math.round(hs/kills*100) : 0,
+    calCount: Math.min(10,games), calibrated,
+    level: calibrated ? mmrToLevel(p.mmr) : null,
+  };
+}
+
+function isStaff(u){ return !!u && (u.role==='OWNER' || u.role==='ADMIN'); }
+
+// Trava de fila dupla: lobby ativo, placar pendente no ADM, contestação aberta ou Karma baixo
+function queueGate(user, db){
+  if(user.karma < 50) return `Busca bloqueada: seu Karma está em ${user.karma}%, abaixo do mínimo de 50%.`;
+  if(db.matches.some(m => m.ownerId===user.id && m.phase!=='finalizada'))
+    return 'Você já tem uma partida ativa ou aguardando o placar do ADM.';
+  if(db.disputes.some(d => d.userId===user.id && d.status==='pendente'))
+    return 'Você tem uma contestação pendente no ADM.';
+  return null;
+}
+
+/* ====================== ROOT APP ====================== */
+
+function App(){
+  const [db, setDb] = useState({ profiles:[], matches:[], reports:[], disputes:[] });
+  const [status, setStatus] = useState('loading'); // loading | ready | error
+  const [loadError, setLoadError] = useState('');
+  const [online, setOnline] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [tab, setTab] = useState('jogar');
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [queueing, setQueueing] = useState(false);
+  const queueLock = useRef(false);
+  const [activeMatchId, setActiveMatchId] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [showSwitcher, setShowSwitcher] = useState(false);
+  const [reportCtx, setReportCtx] = useState(null);
+  // Sincronização: último estado conhecido por registro + chaves enviadas recentemente (filtra o eco do próprio realtime)
+  const sync = useRef(null);
+  if(!sync.current){
+    const maps = () => ({ profiles:new Map(), matches:new Map(), reports:new Map(), disputes:new Map() });
+    sync.current = { last: maps(), recent: maps(), queue: Promise.resolve() };
+  }
+
+  const user = db.profiles.find(p => p.id===sessionId) || null;
+  const match = user ? (db.matches.find(m => m.id===activeMatchId && m.ownerId===user.id) || null) : null;
+
+  const notify = (msg, type='info') => {
+    const id = Date.now() + Math.random();
+    setToasts(t => [...t, {id, msg, type}]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id!==id)), 3200);
+  };
+  const patchMatch = (id, fn) => setDb(d => ({...d, matches: d.matches.map(m => m.id===id ? fn(m) : m)}));
+
+  /* 1) Carrega tudo do Supabase uma vez */
+  useEffect(() => {
+    if(!sb){
+      setStatus('error');
+      setLoadError('A biblioteca do Supabase não carregou. Verifique a internet e recarregue a página.');
+      return;
+    }
+    let alive = true;
+    (async () => {
+      try{
+        const data = await fetchAll();
+        if(!alive) return;
+        TABLES.forEach(t => data[t].forEach(x => sync.current.last[t].set(x.id, canon(MAPPERS[t].to(x)))));
+        setDb(data);
+        setStatus('ready');
+      } catch(e){
+        if(!alive) return;
+        console.error('Supabase load:', e);
+        setLoadError(e.message || String(e));
+        setStatus('error');
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  /* 2) Aplica mudanças vindas de outros clientes (realtime) */
+  function applyRemote(t, row){
+    if(!row || !row.id) return;
+    const x = MAPPERS[t].from(row);
+    const key = canon(MAPPERS[t].to(x));
+    const recent = sync.current.recent[t].get(x.id) || [];
+    if(recent.includes(key)) return; // eco de uma escrita nossa: ignora
+    sync.current.last[t].set(x.id, key);
+    setDb(d => {
+      const list = d[t];
+      const i = list.findIndex(y => y.id===x.id);
+      const next = i>=0
+        ? list.map((y,j) => j===i ? {...x, pickTimer: y.pickTimer ?? 60} : y)
+        : [x, ...list];
+      return {...d, [t]: next};
+    });
+  }
+
+  useEffect(() => {
+    if(status!=='ready' || !sb) return;
+    const ch = sb.channel('s02-live');
+    TABLES.forEach(t => ch.on('postgres_changes', {event:'*', schema:'public', table:t}, payload => applyRemote(t, payload.new)));
+    ch.subscribe(s => setOnline(s === 'SUBSCRIBED'));
+    return () => { sb.removeChannel(ch); };
+  }, [status]);
+
+  /* 3) Envia ao Supabase só os registros que mudaram (fila sequencial, sem gravar pickTimer) */
+  function enqueueWrite(t, batch){
+    sync.current.queue = sync.current.queue.then(async () => {
+      try{
+        const { error } = await sb.from(t).upsert(batch.map(b => b.row));
+        if(error) throw error;
+      } catch(e){
+        console.error('Supabase save', t, e);
+        batch.forEach(b => sync.current.last[t].delete(b.id)); // força nova tentativa na próxima mudança
+        notify(`Falha ao salvar em ${t}: ${e.message || e}`, 'error');
+      }
+    });
+  }
+
+  useEffect(() => {
+    if(status!=='ready' || !sb) return;
+    TABLES.forEach(t => {
+      const batch = [];
+      db[t].forEach(x => {
+        const row = MAPPERS[t].to(x);
+        const key = canon(row);
+        if(sync.current.last[t].get(x.id) !== key){
+          sync.current.last[t].set(x.id, key);
+          const rec = sync.current.recent[t].get(x.id) || [];
+          sync.current.recent[t].set(x.id, [...rec.slice(-19), key]);
+          batch.push({ row, id:x.id });
+        }
+      });
+      if(batch.length) enqueueWrite(t, batch);
+    });
+  }, [db, status]);
+
+  /* ---------- Auth ---------- */
+  function enterSession(id, msg){
+    setSessionId(id); setShowSwitcher(false); setAdminOpen(false);
+    setTab('jogar'); setActiveMatchId(null); setQueueing(false); queueLock.current = false;
+    notify(msg, 'info');
+  }
+  async function login(username, password){
+    if(!USER_RE.test(username)) return 'Usuário ou senha inválidos';
+    const p = db.profiles.find(x => x.username.toLowerCase()===username.toLowerCase());
+    if(!p) return 'Usuário ou senha inválidos';
+    const h = await hashPassword(p.username, password);
+    if(h !== p.passwordHash) return 'Usuário ou senha inválidos';
+    enterSession(p.id, `Bem-vindo, ${p.username}`);
+    return null;
+  }
+  async function register(form){
+    if(!sb) return 'Sem conexão com o servidor';
+    const err = validateRegister(form, db.profiles);
+    if(err) return err;
+    const isFirst = db.profiles.length===0;
+    const p = {
+      id: newUuid(),
+      username: form.username.trim(),
+      passwordHash: await hashPassword(form.username.trim(), form.password),
+      phone: cleanPhone(form.phone), sid: form.sid.trim(),
+      role: isFirst ? 'OWNER' : 'USER', karma:100, mmr:0, history:[], createdAt: Date.now(), avatarUrl:'',
+    };
+    const row = MAPPERS.profiles.to(p);
+    const { error } = await sb.from('profiles').insert(row); // insert direto: já mostra erro de duplicidade do banco
+    if(error){
+      if(error.code==='23505') return 'Usuário, telefone ou ID do Standoff 2 já cadastrado';
+      return 'Erro ao criar conta: ' + error.message;
+    }
+    sync.current.last.profiles.set(p.id, canon(row));
+    setDb(d => ({...d, profiles:[...d.profiles, p]}));
+    enterSession(p.id, isFirst ? 'Conta Master criada com cargo OWNER' : 'Conta criada: 0 MMR · 0/10 MD10');
+    return null;
+  }
+  function logout(){
+    setSessionId(null); setActiveMatchId(null); setShowSwitcher(false);
+    setAdminOpen(false); setTab('jogar'); setQueueing(false); queueLock.current = false;
+  }
+  function goTab(t){ setAdminOpen(false); setTab(t); }
+
+  /* Timer de pick: hooks sempre antes de qualquer return condicional */
+  useEffect(() => {
+    if(!match || match.phase!=='picking' || match.pickTurn!=='me') return;
+    if(match.pickTimer <= 0){ doPick(match.id, 'me', null); return; }
+    const t = setTimeout(() => patchMatch(match.id, m => ({...m, pickTimer: m.pickTimer-1})), 1000);
+    return () => clearTimeout(t);
+  }, [match && match.id, match && match.phase, match && match.pickTurn, match && match.pickTimer]);
+
+  /* ---------- Matchmaking ---------- */
+  function startQueue(){
+    if(!user || queueLock.current) return;
+    const gate = queueGate(user, db);
+    if(gate){ notify(gate, 'error'); return; }
+    queueLock.current = true;
+    setQueueing(true);
+    const uid = user.id, nick = user.username;
+    setTimeout(() => {
+      const id = 'm-' + Date.now();
+      const m = {
+        id, ownerId: uid, ownerNick: nick, phase:'veto', map:null, banned:[],
+        vetoTurn:'me', pool:[], teamA:[], teamB:[], pickTurn:'me', pickTimer:60,
+        roomLink:'', result:null, playerStats:null, disputeStatus:null, annulled:false, createdAt: Date.now(),
+      };
+      setDb(d => ({...d, matches:[m, ...d.matches]}));
+      setActiveMatchId(id);
+      setQueueing(false);
+      queueLock.current = false;
+      setTab('partida');
+      notify('Partida encontrada! Vá para o veto de mapas', 'success');
+    }, 3000);
+  }
+
+  function banMap(matchId, who, mapId){
+    patchMatch(matchId, m => {
+      if(m.phase!=='veto' || m.vetoTurn!==who || m.banned.includes(mapId)) return m;
+      const banned = [...m.banned, mapId];
+      const left = MAPS.filter(x => !banned.includes(x.id));
+      if(left.length===1){
+        const cap = shuffle(NICK_POOL);
+        return {
+          ...m, banned, vetoTurn:null, map:left[0].id, phase:'picking',
+          teamA:[m.ownerNick], teamB:[cap[0]], pool: cap.slice(1,9),
+          pickTurn:'me', pickTimer:60,
+        };
+      }
+      return {...m, banned, vetoTurn: who==='me' ? 'bot' : 'me'};
+    });
+  }
+  function botBan(){
+    if(!match) return;
+    const left = MAPS.filter(x => !match.banned.includes(x.id));
+    banMap(match.id, 'bot', left[rand(0,left.length-1)].id);
+  }
+
+  function doPick(matchId, who, nick){
+    patchMatch(matchId, m => {
+      if(m.phase!=='picking' || m.pickTurn!==who || m.pool.length===0) return m;
+      const chosen = nick || m.pool[rand(0, m.pool.length-1)];
+      const pool = m.pool.filter(p => p!==chosen);
+      const done = pool.length===0;
+      return {
+        ...m, pool,
+        teamA: who==='me' ? [...m.teamA, chosen] : m.teamA,
+        teamB: who==='bot' ? [...m.teamB, chosen] : m.teamB,
+        pickTurn: done ? null : (who==='me' ? 'bot' : 'me'),
+        pickTimer: 60,
+        phase: done ? 'ready' : 'picking',
+      };
+    });
+  }
+  function pickPlayer(nick){ if(match) doPick(match.id, 'me', nick); }
+  function botPick(){ if(match) doPick(match.id, 'bot', null); }
+
+  /* Jogador encerra a partida: estatísticas pessoais ficam registradas e o placar vai para o ADM */
+  function endMatch(){
+    if(!match || match.phase!=='ready') return;
+    const kills = rand(8,24), deaths = rand(6,20);
+    const hs = Math.round(kills*(0.2+Math.random()*0.4));
+    patchMatch(match.id, m => ({...m, phase:'aguardando_placar', playerStats:{kills, deaths, hs}}));
+    notify('Partida encerrada. Aguardando o ADM lançar o placar', 'info');
+  }
+
+  function contestResult(){
+    if(!match || !match.result || match.annulled || match.disputeStatus==='pendente') return;
+    const id = 'd-' + Date.now();
+    setDb(d => ({
+      ...d,
+      disputes:[{ id, matchId: match.id, userId: user.id, username: user.username, status:'pendente', createdAt: new Date().toISOString() }, ...d.disputes],
+      matches: d.matches.map(m => m.id===match.id ? {...m, disputeStatus:'pendente'} : m),
+    }));
+    notify('Contestação enviada ao painel do ADM', 'info');
+  }
+
+  function leaveMatch(){ setActiveMatchId(null); goTab('jogar'); }
+
+  function enterRoom(link){
+    if(!isValidRoomLink(link)){ notify('Link da sala inválido', 'error'); return; }
+    const w = window.open(link, '_blank');
+    notify(w ? 'Abrindo a sala no Standoff 2…' : 'Pop-up bloqueado pelo navegador. Permita pop-ups ou abra o link manualmente', w ? 'info' : 'error');
+  }
+
+  /* ---------- Perfil ---------- */
+  function setAvatar(url){
+    const v = (url || '').trim();
+    if(!isValidAvatarUrl(v)){ notify('Use uma URL https:// pública, sem espaços', 'error'); return; }
+    setDb(d => ({...d, profiles: d.profiles.map(p => p.id===user.id ? {...p, avatarUrl: v} : p)}));
+    notify(v ? 'Foto de perfil atualizada' : 'Foto de perfil removida', 'success');
+  }
+
+  /* ---------- Denúncias ---------- */
+  function openReport(targets){ setReportCtx({ targets, preset:'' }); }
+  function submitReport(target, cat){
+    setDb(d => ({...d, reports:[{
+      id:'r-'+Date.now(), reporter: user.username, reporterId: user.id, targetNick: target,
+      category: cat, matchId: match ? match.id : null, status:'pendente', createdAt: new Date().toISOString(),
+    }, ...d.reports]}));
+    setReportCtx(null);
+    notify('Denúncia enviada para a fila de análise do ADM', 'success');
+  }
+
+  /* ---------- Ações do staff (ADM / OWNER) ---------- */
+  function setRoomLink(matchId, link){
+    if(!isValidRoomLink(link)){ notify('Link inválido: use https:// ou intent://', 'error'); return; }
+    patchMatch(matchId, m => ({...m, roomLink: link}));
+    notify('Link da sala atualizado pelo ADM', 'success');
+  }
+
+  /* Placar CT x TR. aSide = lado em que o Time A começou (CT ou TR). */
+  function submitScore(matchId, aSide, ct, tr){
+    const m = db.matches.find(x => x.id===matchId);
+    if(!m) return;
+    const awaiting = m.phase==='aguardando_placar' || (m.ownerId===null && m.phase==='ready');
+    if(!awaiting){ notify('Esta partida não está aguardando placar', 'error'); return; }
+
+    const aStartsCT = aSide==='CT';
+    const winnerSide = ct > tr ? 'CT' : 'TR';
+    const winnerTeam = ((winnerSide==='CT') === aStartsCT) ? 'A' : 'B';
+    const ownerTeam = m.teamA.includes(m.ownerNick) ? 'A' : 'B';
+    const owner = m.ownerId ? db.profiles.find(p => p.id===m.ownerId) : null;
+    const won = owner ? winnerTeam===ownerTeam : null;
+    const ps = m.playerStats || { kills:12, deaths:10, hs:5 };
+    const mmrChange = owner ? calcMmrChange(won, ps.kills/Math.max(1,ps.deaths)) : 0;
+    const date = new Date().toLocaleDateString('pt-BR');
+
+    const result = {
+      winnerTeam, winnerSide, ctScore: ct, trScore: tr, aStartsCT, won, mmrChange,
+      kills: ps.kills, deaths: ps.deaths, hs: ps.hs, map: mapName(m.map), date,
+    };
+    const entry = owner ? {
+      matchId, result: won ? 'win' : 'loss', mmrChange, map: mapName(m.map), date,
+      kills: ps.kills, deaths: ps.deaths, hs: ps.hs, ctScore: ct, trScore: tr,
+    } : null;
+    const newMmr = owner ? Math.max(0, owner.mmr + mmrChange) : 0;
+    const newCount = owner ? Math.min(10, owner.history.length + 1) : 0;
+    const before = owner ? getStats(owner) : null;
+
+    setDb(d => ({
+      ...d,
+      profiles: entry ? d.profiles.map(p => p.id===m.ownerId ? {...p, mmr:newMmr, history:[entry, ...p.history].slice(0,50)} : p) : d.profiles,
+      matches: d.matches.map(x => x.id===matchId ? {...x, phase:'finalizada', result, disputeStatus:null, annulled:false} : x),
+    }));
+
+    notify(`Placar lançado: CT ${ct} x ${tr} TR`, 'success');
+    if(owner){
+      notify(won ? `Vitória: +${mmrChange} MMR` : `Derrota: ${mmrChange} MMR`, won ? 'success' : 'error');
+      if(!before.calibrated && newCount>=10) notify(`Calibragem concluída! Level ${mmrToLevel(newMmr)} desbloqueado`, 'success');
+      else if(before.calibrated && mmrToLevel(newMmr) > before.level) notify(`Você subiu para o Level ${mmrToLevel(newMmr)}!`, 'success');
+    }
+  }
+
+  function createTestMatch(){
+    const sh = shuffle(NICK_POOL);
+    const m = {
+      id:'m-'+Date.now(), ownerId:null, ownerNick:'Partida de teste', phase:'ready',
+      map: MAPS[rand(0,MAPS.length-1)].id, banned:[], vetoTurn:null, pool:[],
+      teamA: sh.slice(0,5), teamB: sh.slice(5,10), pickTurn:null, pickTimer:60,
+      roomLink:'', result:null, playerStats:null, disputeStatus:null, annulled:false, createdAt: Date.now(),
+    };
+    setDb(d => ({...d, matches:[m, ...d.matches]}));
+    notify('Partida de teste criada com 10 bots', 'info');
+  }
+
+  function decideReport(id, confirm){
+    const rep = db.reports.find(r => r.id===id);
+    if(!rep || rep.status!=='pendente') return;
+    const penalty = CATEGORIES[rep.category].penalty;
+    const hasAccount = db.profiles.some(p => p.username===rep.targetNick);
+    setDb(d => ({
+      ...d,
+      reports: d.reports.map(r => r.id===id ? {...r, status: confirm ? 'confirmada' : 'descartada'} : r),
+      profiles: confirm ? d.profiles.map(p => p.username===rep.targetNick ? {...p, karma: Math.max(0, p.karma-penalty)} : p) : d.profiles,
+    }));
+    if(confirm) notify(hasAccount ? `Denúncia confirmada: ${rep.targetNick} perdeu ${penalty}% de Karma` : 'Denúncia confirmada (alvo sem conta cadastrada)', 'warn');
+    else notify('Denúncia descartada', 'info');
+  }
+
+  function createTestReport(){
+    const cats = Object.keys(CATEGORIES);
+    const cat = cats[rand(0,cats.length-1)];
+    setDb(d => ({...d, reports:[{
+      id:'r-'+Date.now(), reporter: NICK_POOL[0], reporterId: null, targetNick: user.username, category: cat,
+      matchId:null, status:'pendente', createdAt: new Date().toISOString(),
+    }, ...d.reports]}));
+    notify('Denúncia de teste criada contra sua conta', 'info');
+  }
+
+  function decideDispute(id, approve){
+    const dsp = db.disputes.find(x => x.id===id);
+    if(!dsp || dsp.status!=='pendente') return;
+    setDb(d => {
+      const profiles = approve ? d.profiles.map(p => {
+        if(p.id!==dsp.userId) return p;
+        const entry = p.history.find(h => h.matchId===dsp.matchId);
+        if(!entry) return p;
+        return {...p, mmr: Math.max(0, p.mmr-entry.mmrChange), history: p.history.filter(h => h.matchId!==dsp.matchId)};
+      }) : d.profiles;
+      return {
+        ...d, profiles,
+        disputes: d.disputes.map(x => x.id===id ? {...x, status: approve ? 'aprovada' : 'rejeitada'} : x),
+        matches: d.matches.map(m => m.id===dsp.matchId ? {...m, disputeStatus: approve ? 'aprovada' : 'rejeitada', annulled: approve} : m),
+      };
+    });
+    notify(approve ? 'Contestação aprovada: resultado anulado e MMR revertido' : 'Contestação rejeitada: resultado mantido', approve ? 'warn' : 'info');
+  }
+
+  function setRole(id, role){
+    if(!user || user.role!=='OWNER'){ notify('Somente o OWNER gerencia cargos', 'error'); return; }
+    setDb(d => ({...d, profiles: d.profiles.map(p => p.id===id ? {...p, role} : p)}));
+    notify(role==='ADMIN' ? 'Usuário promovido a ADMIN' : 'Cargo ADMIN removido', 'success');
+  }
+
+  /* Wrapper de proteção: nenhuma ação de staff roda para usuário comum */
+  const staff = fn => (...args) => {
+    if(!user || !isStaff(user)){ notify('Acesso restrito ao staff', 'error'); return; }
+    return fn(...args);
+  };
+
+  /* ---------- Render ---------- */
+  useEffect(() => {
+    if(status==='ready' || status==='error') document.getElementById('root').dataset.mounted = '1';
+  }, [status]);
+
+  if(status==='loading'){
+    return <StatusScreen title="Conectando ao servidor…" detail="Carregando contas, partidas e denúncias do Supabase." />;
+  }
+  if(status==='error'){
+    return (
+      <StatusScreen
+        title="Não foi possível carregar os dados"
+        detail={loadError + ' — Se for erro de tabela, rode o arquivo supabase_schema.sql no SQL Editor do Supabase.'}
+        onRetry={() => location.reload()} />
+    );
+  }
+
+  if(!user){
+    return (
+      <div className="min-h-screen max-w-md mx-auto flex items-center justify-center px-4">
+        <ToastStack toasts={toasts} />
+        <AuthScreen accounts={db.profiles} onLogin={login} onRegister={register} />
+      </div>
+    );
+  }
+
+  const st = getStats(user);
+  const canAdmin = isStaff(user);
+  const others = db.profiles.filter(p => p.id!==user.id).map(p => p.username);
+
+  const actions = {
+    enterRoom, banMap, botBan, pickPlayer, botPick, endMatch, contestResult, leaveMatch,
+    openReport, setAvatar,
+    openAdmin: () => { if(isStaff(user)) setAdminOpen(true); },
+    logout,
+    setRoomLink: staff(setRoomLink),
+    submitScore: staff(submitScore),
+    createTestMatch: staff(createTestMatch),
+    decideReport: staff(decideReport),
+    createTestReport: staff(createTestReport),
+    decideDispute: staff(decideDispute),
+    setRole: staff(setRole),
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col max-w-md mx-auto relative">
+      <ToastStack toasts={toasts} />
+      <Header user={user} st={st} onSwitch={() => setShowSwitcher(true)} />
+      <main className="flex-1 overflow-y-auto no-scrollbar px-4 pb-28 pt-2">
+        {adminOpen && canAdmin ? (
+          <AdminPanel db={db} user={user} actions={actions} onBack={() => setAdminOpen(false)} />
+        ) : tab==='jogar' ? (
+          <Lobby user={user} db={db} st={st} queueing={queueing} startQueue={startQueue} goTab={goTab} online={online} />
+        ) : tab==='partida' ? (
+          <PartidaTab match={match} user={user} actions={actions} />
+        ) : tab==='perfil' ? (
+          <PerfilTab user={user} st={st} canAdmin={canAdmin} others={others} actions={actions} />
+        ) : (
+          <RankingTab db={db} user={user} />
+        )}
+      </main>
+      <BottomNav tab={tab} setTab={goTab} matchActive={!!match && match.phase!=='finalizada'} />
+
+      {showSwitcher && (
+        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/70 backdrop-blur-sm px-4 py-6" onClick={() => setShowSwitcher(false)}>
+          <div className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <AuthScreen accounts={db.profiles} onLogin={login} onRegister={register} onCancel={() => setShowSwitcher(false)} />
+          </div>
+        </div>
+      )}
+
+      {reportCtx && (
+        <ReportModal targets={reportCtx.targets} preset={reportCtx.preset}
+          onClose={() => setReportCtx(null)} onSubmit={submitReport} />
+      )}
+    </div>
+  );
+}
+
+/* ====================== STATUS / TOASTS ====================== */
+
+function StatusScreen({ title, detail, onRetry }){
+  return (
+    <div className="min-h-screen max-w-md mx-auto flex items-center justify-center px-4">
+      <div className={CARD + " w-full p-5 text-center rise"}>
+        <div className="w-11 h-11 mx-auto rounded-xl bg-gradient-to-br from-[var(--blue)] to-[var(--blue-dim)] flex items-center justify-center font-display font-bold text-lg mb-3">S</div>
+        <p className="font-display font-bold text-lg">{title}</p>
+        {detail && <p className="text-xs text-[var(--text-dim)] mt-2 break-words">{detail}</p>}
+        {onRetry && (
+          <button onClick={onRetry} className="mt-4 px-4 py-2 rounded-lg bg-[var(--blue)] font-display font-bold text-sm active:scale-95 transition-transform">Tentar novamente</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ToastStack({ toasts }){
+  const colors = { info:'var(--blue)', success:'var(--green)', error:'var(--red)', warn:'var(--orange)' };
+  return (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-[92%] max-w-sm space-y-2 pointer-events-none">
+      {toasts.map(t => (
+        <div key={t.id} className="rise bg-[var(--surface)] border rounded-xl px-3.5 py-2.5 text-sm shadow-lg" style={{ borderColor: colors[t.type] }}>
+          {t.msg}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ====================== AUTH ====================== */
+
+function Field({ label, children }){
+  return (
+    <div>
+      <label className="text-[11px] text-[var(--text-dim)] font-display uppercase tracking-wide">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function AuthScreen({ accounts, onLogin, onRegister, onCancel }){
+  const [mode, setMode] = useState(accounts.length===0 ? 'register' : 'login');
+  const [f, setF] = useState({ username:'', password:'', phone:'', sid:'' });
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = k => e => { const v = e.target.value; setF(p => ({...p, [k]: v})); };
+  const ready = mode==='login'
+    ? (f.username.trim() && f.password)
+    : (f.username.trim() && f.password && f.phone && f.sid);
+
+  async function submit(){
+    setErr(''); setBusy(true);
+    try{
+      const msg = mode==='login' ? await onLogin(f.username.trim(), f.password) : await onRegister(f);
+      if(msg) setErr(msg);
+    } catch(e){
+      setErr('Erro inesperado: ' + (e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={CARD + " w-full p-5 rise"}>
+      <div className="text-center mb-4">
+        <div className="w-11 h-11 mx-auto rounded-xl bg-gradient-to-br from-[var(--blue)] to-[var(--blue-dim)] flex items-center justify-center font-display font-bold text-lg mb-2">S</div>
+        <h1 className="font-display font-bold text-xl">S02 FACEIT</h1>
+        <p className="text-[var(--text-dim)] text-xs mt-1">{mode==='login' ? 'Entre com seu usuário e senha' : 'Crie sua conta para jogar'}</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-1 bg-[var(--surface-2)] rounded-lg p-1 mb-4">
+        {[['login','Entrar'],['register','Criar conta']].map(([id,label]) => (
+          <button key={id} onClick={() => { setMode(id); setErr(''); }}
+            className={"py-2 rounded-md text-xs font-display font-bold transition-colors " + (mode===id ? "bg-[var(--blue)] text-white" : "text-[var(--text-dim)]")}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {mode==='login' && accounts.length>0 && (
+        <div className="mb-3">
+          <p className="text-[10px] font-display uppercase tracking-wide text-[var(--text-dim)] mb-1.5">Contas cadastradas</p>
+          <div className="flex flex-wrap gap-1.5">
+            {accounts.map(a => (
+              <button key={a.id} onClick={() => setF(p => ({...p, username:a.username}))}
+                className="px-2.5 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--line)] text-xs">{a.username}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        <Field label="Usuário">
+          <input className={INPUT} value={f.username} onChange={set('username')} maxLength={16} placeholder="seu_usuario" autoCapitalize="none" autoComplete="username" />
+        </Field>
+        <Field label="Senha">
+          <input className={INPUT} type="password" value={f.password} onChange={set('password')} maxLength={64} placeholder="••••••••" autoComplete={mode==='login' ? 'current-password' : 'new-password'} />
+        </Field>
+        {mode==='register' && (
+          <>
+            <Field label="Telefone">
+              <input className={INPUT} type="tel" inputMode="tel" value={f.phone} onChange={set('phone')} maxLength={20} placeholder="DDD + número" />
+            </Field>
+            <Field label="ID do Standoff 2">
+              <input className={INPUT} inputMode="numeric" value={f.sid} onChange={set('sid')} maxLength={9} placeholder="7 a 9 números" />
+            </Field>
+            <p className="text-[11px] text-[var(--text-dim)]">Conta nova: 0 MMR e 0/10 partidas de calibragem (MD10). Telefone e ID do Standoff 2 são obrigatórios e não podem repetir entre contas.</p>
+          </>
+        )}
+      </div>
+
+      {err && <p className="text-xs text-[var(--red)] mt-3 break-words">{err}</p>}
+
+      <div className="flex gap-2.5 mt-5">
+        {onCancel && (
+          <button onClick={onCancel} className="flex-1 py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--line)] font-display font-semibold text-sm active:scale-95 transition-transform">Cancelar</button>
+        )}
+        <button onClick={submit} disabled={!ready || busy}
+          className="flex-1 py-2.5 rounded-lg bg-[var(--blue)] font-display font-semibold text-sm active:scale-95 transition-transform disabled:opacity-40">
+          {busy ? 'Aguarde…' : (mode==='login' ? 'Entrar' : 'Criar e entrar')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ====================== HEADER ====================== */
+
+function Avatar({ name, size, url }){
+  return (
+    <div className={(size || 'w-12 h-12 text-lg') + " rounded-xl overflow-hidden bg-gradient-to-br from-[var(--blue)] to-[var(--blue-dim)] flex items-center justify-center font-display font-bold flex-shrink-0"}>
+      {url ? <img src={url} alt="" className="w-full h-full object-cover" onError={e => { e.currentTarget.style.display='none'; }} /> : (name || '?').slice(0,1).toUpperCase()}
+    </div>
+  );
+}
+
+function Header({ user, st, onSwitch }){
+  const roleBadge = user.role!=='USER' ? user.role : null;
+  return (
+    <div className="sticky top-0 z-20 backdrop-blur-md bg-[#0A0D12]/90 border-b border-[var(--line)] px-4 py-3 flex items-center justify-between gap-2" style={{paddingTop:'env(safe-area-inset-top, 12px)'}}>
+      <div className="flex items-center gap-2.5 min-w-0">
+        <Avatar name={user.username} url={user.avatarUrl} size="w-9 h-9 text-sm" />
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <p className="font-display font-bold text-sm truncate leading-tight">{user.username}</p>
+            {roleBadge && <span className="text-[9px] font-display font-bold px-1 rounded bg-[var(--blue)]/20 text-[var(--blue)]">{roleBadge}</span>}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={"text-[10px] font-display font-bold px-1.5 rounded " + (st.calibrated ? "bg-[var(--orange)]/20 text-[var(--orange)]" : "bg-[var(--surface-2)] text-[var(--orange)] border border-[var(--orange)]/40")}>
+              {st.calibrated ? 'LVL ' + st.level : 'CALIBRAGEM ' + st.calCount + '/10'}
+            </span>
+            <span className="text-[10px] font-display font-semibold text-[var(--text-dim)]">{user.mmr} MMR</span>
+          </div>
+        </div>
+      </div>
+      <button onClick={onSwitch} className="flex-shrink-0 w-9 h-9 rounded-full bg-[var(--surface)] border border-[var(--line)] flex items-center justify-center text-[var(--text-dim)] active:scale-95 transition-transform">⇄</button>
+    </div>
+  );
+}
+
+/* ====================== LOBBY ====================== */
+
+function Lobby({ user, db, st, queueing, startQueue, goTab, online }){
+  const gate = queueGate(user, db);
+  const inProgress = db.matches.some(m => m.ownerId===user.id && m.phase!=='finalizada');
+  const blocked = user.karma < 50;
+  return (
+    <div className="rise space-y-4 pt-1">
+      <div className="text-[10px] text-right" style={{color: online ? 'var(--green)' : 'var(--text-dim)'}}>
+        {online ? '● Conectado ao servidor (tempo real)' : '○ Tempo real indisponível (dados sincronizam ao salvar)'}
+      </div>
+
+      <div className="relative rounded-2xl overflow-hidden border border-[var(--line)] h-28 banner-pattern" style={{background:'linear-gradient(120deg,#122A5C,#0B1A38)'}}>
+        <div className="absolute inset-0 flex flex-col justify-center px-4">
+          <span className="text-[10px] font-display font-bold text-[var(--orange)] uppercase tracking-wide">Temporada 1</span>
+          <p className="font-display font-bold text-lg leading-tight">Ligas Ativas</p>
+          <p className="text-[11px] text-[var(--text-dim)] mt-0.5">Compita, suba de nível e dispute o topo do ranking</p>
+        </div>
+        <div className="absolute right-3 bottom-3 text-3xl opacity-80">🏆</div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2.5">
+        <QuickStat label="Winrate" value={st.winrate + '%'} />
+        <QuickStat label="Partidas" value={st.games} />
+        <QuickStat label="K/D médio" value={st.kd.toFixed ? st.kd.toFixed(2) : st.kd} />
+      </div>
+
+      {gate && (
+        <div className={"rounded-2xl border p-4 " + (blocked ? "border-[var(--red)]/50 bg-[var(--red)]/10" : "border-[var(--orange)]/40 bg-[var(--orange)]/10")}>
+          <p className={"font-display font-bold text-sm mb-1 " + (blocked ? "text-[var(--red)]" : "text-[var(--orange)]")}>
+            {blocked ? 'Busca bloqueada por Karma baixo' : 'Busca indisponível no momento'}
+          </p>
+          <p className="text-[11px] text-[var(--text-dim)]">{gate}</p>
+          {inProgress && (
+            <button onClick={() => goTab('partida')} className="mt-3 px-3 py-1.5 rounded-lg bg-[var(--blue)] text-xs font-display font-bold">Ir para a partida</button>
+          )}
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-5">
+        <div className="flex items-center justify-between mb-1">
+          <p className="font-display font-bold text-lg">Competitivo 5v5</p>
+          <span className={"text-[10px] font-display font-bold px-2 py-0.5 rounded " + (gate ? "bg-[var(--red)]/15 text-[var(--red)]" : "bg-[var(--green)]/15 text-[var(--green)]")}>
+            {gate ? 'INDISPONÍVEL' : 'ONLINE'}
+          </span>
+        </div>
+        <p className="text-[var(--text-dim)] text-xs mb-5">Veto de mapas, pick por turnos e MMR por placar CT x TR validado pelo ADM.</p>
+        <div className="flex flex-col items-center gap-3">
+          <button onClick={startQueue} disabled={!!gate || queueing}
+            className={"relative w-36 h-36 rounded-full font-display font-bold text-base flex flex-col items-center justify-center gap-1 transition-transform active:scale-95 " +
+              (gate || queueing ? "bg-[var(--surface-2)] border border-[var(--line)] text-[var(--text-dim)]" : "bg-gradient-to-br from-[var(--blue)] to-[#1a4fb0] text-white pulse")}>
+            {queueing ? (
+              <>
+                <Spinner />
+                <span className="mt-2 text-sm">Buscando...</span>
+              </>
+            ) : (
+              <>
+                <span className="text-2xl">{gate ? '🔒' : '⚔'}</span>
+                <span>JOGAR</span>
+              </>
+            )}
+          </button>
+          {queueing && <p className="text-[var(--text-dim)] text-xs font-display tracking-wide">Montando lobby...</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className={CARD + " p-4"}>
+          <div className="text-xl mb-2">📊</div>
+          <p className="font-display font-bold text-sm">MD10</p>
+          <p className="text-[10px] text-[var(--text-dim)] mb-2">Calibragem</p>
+          <p className="text-[11px] font-semibold" style={{color: st.calibrated ? 'var(--green)' : 'var(--orange)'}}>
+            {st.calibrated ? 'Calibragem concluída' : st.calCount + '/10 partidas'}
+          </p>
+        </div>
+        <div className={CARD + " p-4 opacity-60"}>
+          <div className="flex items-center justify-between mb-2"><span className="text-xl">🏠</span><span className="text-[10px]">🔒</span></div>
+          <p className="font-display font-bold text-sm">Hubs de Clãs</p>
+          <p className="text-[10px] text-[var(--text-dim)] mb-2">Em breve</p>
+          <p className="text-[11px] font-semibold text-[var(--text-dim)]">Disponível em breve</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickStat({ label, value }){
+  return (
+    <div className="bg-[var(--surface)] border border-[var(--line)] rounded-xl py-2.5 text-center">
+      <p className="font-display font-bold text-base">{value}</p>
+      <p className="text-[9px] text-[var(--text-dim)] uppercase tracking-wide mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+function Spinner(){
+  return <div className="w-6 h-6 border-2 border-[var(--text-dim)] border-t-[var(--blue)] rounded-full animate-spin"></div>;
+}
+
+/* ====================== PARTIDA ====================== */
+
+function PartidaTab({ match, user, actions }){
+  if(!match){
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-3 rise">
+        <div className="w-14 h-14 rounded-xl bg-[var(--surface)] border border-[var(--line)] flex items-center justify-center text-2xl">🎮</div>
+        <p className="font-display font-semibold text-lg">Nenhuma partida ativa</p>
+        <p className="text-[var(--text-dim)] text-sm max-w-[240px]">Vá até a aba Jogar e inicie uma busca para entrar no veto de mapas.</p>
+      </div>
+    );
+  }
+  const showRoom = ['veto','picking','ready'].includes(match.phase);
+  return (
+    <div className="rise space-y-4">
+      {showRoom && <EnterRoomCard match={match} onEnter={actions.enterRoom} />}
+      {match.phase==='veto' && <VetoView match={match} actions={actions} />}
+      {match.phase==='picking' && <PickView match={match} user={user} actions={actions} />}
+      {match.phase==='ready' && <ReadyView match={match} user={user} actions={actions} />}
+      {match.phase==='aguardando_placar' && <AwaitingView match={match} user={user} actions={actions} />}
+      {match.phase==='finalizada' && <FinishedView match={match} user={user} actions={actions} />}
+    </div>
+  );
+}
+
+function EnterRoomCard({ match, onEnter }){
+  const canEnter = match.phase==='ready' && isValidRoomLink(match.roomLink);
+  const hint = canEnter ? 'Abre o link oficial da sala no Standoff 2'
+    : match.phase!=='ready' ? 'Liberado quando os 10 jogadores estiverem montados'
+    : 'O ADM ainda não inseriu um link válido';
+  return (
+    <div className={CARD + " p-4"}>
+      <div className="flex items-center justify-between mb-3">
+        <p className="font-display font-bold text-sm">Sala do Standoff 2</p>
+        <span className="text-[10px] font-display font-bold px-2 py-0.5 rounded bg-[var(--surface-2)] text-[var(--text-dim)]">
+          {isValidRoomLink(match.roomLink) ? 'LINK LIBERADO' : 'AGUARDANDO ADM'}
+        </span>
+      </div>
+      <button disabled={!canEnter} onClick={() => onEnter(match.roomLink)}
+        className={"w-full py-3.5 rounded-xl font-display font-bold text-base active:scale-95 transition-transform disabled:opacity-40 " +
+          (canEnter ? "bg-gradient-to-r from-[var(--orange)] to-[#ff9a4d] text-black pulse" : "bg-[var(--surface-2)] border border-[var(--line)] text-[var(--text-dim)]")}>
+        ENTRAR NA SALA
+      </button>
+      <p className="text-[11px] text-[var(--text-dim)] mt-2 text-center">{hint}</p>
+    </div>
+  );
+}
+
+function TurnBanner({ mine, meLabel, botLabel }){
+  return (
+    <div className={"rounded-lg px-3 py-2 text-sm font-display font-semibold text-center border " +
+      (mine ? "bg-[var(--blue)]/15 border-[var(--blue)]/40 text-[var(--blue)]" : "bg-[var(--surface-2)] border-[var(--line)] text-[var(--text-dim)]")}>
+      {mine ? meLabel : botLabel}
+    </div>
+  );
+}
+
+function MapBanner({ mapId, label }){
+  const m = MAPS.find(x => x.id===mapId);
+  return (
+    <div className="rounded-2xl overflow-hidden border border-[var(--line)] relative h-36" style={{ background: m ? m.img : 'var(--surface)' }}>
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/20 to-transparent flex flex-col justify-end p-4">
+        <span className="text-[11px] font-display font-bold text-[var(--orange)]">{label}</span>
+        <span className="font-display font-bold text-3xl">{m ? m.name : '—'}</span>
+      </div>
+    </div>
+  );
+}
+
+function VetoView({ match, actions }){
+  const remaining = MAPS.filter(m => !match.banned.includes(m.id)).length;
+  return (
+    <div className={CARD + " p-4 space-y-4"}>
+      <div className="flex items-center justify-between">
+        <h2 className="font-display font-bold text-lg">Veto de Mapas</h2>
+        <span className="text-xs font-display px-2 py-1 rounded bg-[var(--surface-2)] border border-[var(--line)] text-[var(--text-dim)]">{remaining} restantes</span>
+      </div>
+      <TurnBanner mine={match.vetoTurn==='me'} meLabel="Sua vez de banir um mapa" botLabel="Aguardando o capitão adversário" />
+      <div className="grid grid-cols-2 gap-3">
+        {MAPS.map(m => {
+          const banned = match.banned.includes(m.id);
+          const mine = match.vetoTurn==='me' && !banned;
+          return (
+            <button key={m.id} disabled={banned || match.vetoTurn!=='me'} onClick={() => actions.banMap(match.id, 'me', m.id)}
+              className={"relative rounded-xl overflow-hidden h-24 border transition-all " +
+                (banned ? "border-[var(--red)]/40 opacity-40" : "border-[var(--line)] active:scale-95") + (mine ? " ring-1 ring-[var(--blue)]/50" : "")}
+              style={{ background: m.img }}>
+              <div className="absolute inset-0 bg-black/30 flex items-end p-2">
+                <span className="font-display font-bold text-sm">{m.name}</span>
+              </div>
+              {banned && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+                  <span className="font-display font-bold text-[var(--red)] text-xs skew-tag bg-black/70 px-3 py-1">BANIDO</span>
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {match.vetoTurn==='bot' && (
+        <button onClick={actions.botBan} className="w-full py-3 rounded-xl bg-[var(--surface-2)] border border-[var(--line)] font-display font-semibold text-sm active:scale-95 transition-transform">
+          Simular Ban do Bot (Capitão Adversário)
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PickView({ match, user, actions }){
+  return (
+    <div className="space-y-4">
+      <MapBanner mapId={match.map} label="Mapa da partida" />
+      <div className={CARD + " p-4 space-y-4"}>
+        <div className="flex items-center justify-between">
+          <h2 className="font-display font-bold text-lg">Escolha de Jogadores</h2>
+          <span className="text-xs font-display px-2 py-1 rounded bg-[var(--surface-2)] border border-[var(--line)] text-[var(--text-dim)]">{match.pool.length} disponíveis</span>
+        </div>
+        <TurnBanner mine={match.pickTurn==='me'} meLabel="Sua vez de escolher" botLabel="Capitão adversário escolhendo" />
+        {match.pickTurn==='me' && (
+          <div className="flex items-center justify-center gap-2">
+            <span className={"font-display font-bold text-2xl " + (match.pickTimer<=10 ? "text-[var(--red)]" : "text-[var(--blue)]")}>{match.pickTimer}s</span>
+            <span className="text-xs text-[var(--text-dim)]">escolha automática ao zerar</span>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2.5">
+          {match.pool.map(nick => (
+            <button key={nick} disabled={match.pickTurn!=='me'} onClick={() => actions.pickPlayer(nick)}
+              className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] py-3 px-3 text-sm font-semibold active:scale-95 transition-transform disabled:opacity-50">
+              {nick}
+            </button>
+          ))}
+        </div>
+        {match.pickTurn==='bot' && (
+          <button onClick={actions.botPick} className="w-full py-3 rounded-xl bg-[var(--surface-2)] border border-[var(--line)] font-display font-semibold text-sm active:scale-95 transition-transform">
+            Simular Pick do Bot (Capitão Adversário)
+          </button>
+        )}
+      </div>
+      <TeamGrid match={match} user={user} />
+    </div>
+  );
+}
+
+function ReportButton({ targets, onReport }){
+  return (
+    <button onClick={() => onReport(targets)} className="w-full py-3 rounded-xl border border-[var(--red)]/40 text-[var(--red)] font-display font-semibold text-sm active:scale-95 transition-transform">
+      Denunciar Jogador
+    </button>
+  );
+}
+
+function otherPlayers(match, user){
+  return [...match.teamA, ...match.teamB].filter(n => n!==user.username);
+}
+
+function ReadyView({ match, user, actions }){
+  return (
+    <div className="space-y-4">
+      <MapBanner mapId={match.map} label="Mapa da partida" />
+      <TeamGrid match={match} user={user} />
+      <div className={CARD + " p-4 space-y-2"}>
+        <p className="font-display font-semibold text-sm">Partida em andamento</p>
+        <p className="text-[11px] text-[var(--text-dim)]">Quando a partida acabar no jogo, encerre aqui para enviar o placar CT x TR ao ADM.</p>
+        <button onClick={actions.endMatch} className="w-full py-3 rounded-xl bg-[var(--blue)] font-display font-bold text-sm active:scale-95 transition-transform">
+          Encerrar partida e enviar ao ADM
+        </button>
+      </div>
+      <ReportButton targets={otherPlayers(match, user)} onReport={actions.openReport} />
+    </div>
+  );
+}
+
+function AwaitingView({ match, user, actions }){
+  return (
+    <div className="space-y-4">
+      <MapBanner mapId={match.map} label="Mapa jogado" />
+      <TeamGrid match={match} user={user} />
+      <div className={CARD + " p-4 border-[var(--orange)]/40 space-y-1"}>
+        <p className="font-display font-bold text-sm text-[var(--orange)]">Aguardando o ADM</p>
+        <p className="text-[11px] text-[var(--text-dim)]">O placar final (CT x TR) precisa ser lançado pelo ADM antes do MMR ser distribuído. Nova busca fica bloqueada até lá.</p>
+      </div>
+      <ReportButton targets={otherPlayers(match, user)} onReport={actions.openReport} />
+    </div>
+  );
+}
+
+function FinishedView({ match, user, actions }){
+  const r = match.result;
+  const pending = match.disputeStatus==='pendente';
+  const sideA = r.aStartsCT ? 'CT' : 'TR';
+  const sideB = r.aStartsCT ? 'TR' : 'CT';
+  return (
+    <div className="space-y-4">
+      <MapBanner mapId={match.map} label="Mapa jogado" />
+      <div className={CARD + " p-4 space-y-3"}>
+        <p className="font-display font-bold text-xs text-[var(--text-dim)] uppercase tracking-wide">Placar final</p>
+        <div className="flex items-center justify-around">
+          <div className="text-center">
+            <p className="text-[10px] font-display font-bold text-[var(--blue)]">CT</p>
+            <p className="font-display font-bold text-4xl">{r.ctScore}</p>
+          </div>
+          <span className="font-display text-[var(--text-dim)]">x</span>
+          <div className="text-center">
+            <p className="text-[10px] font-display font-bold text-[var(--orange)]">TR</p>
+            <p className="font-display font-bold text-4xl">{r.trScore}</p>
+          </div>
+        </div>
+        <p className="text-[11px] text-center text-[var(--text-dim)]">Time A começou em {sideA} · Time B começou em {sideB}</p>
+      </div>
+
+      <TeamGrid match={match} user={user} />
+
+      <div className={CARD + " p-4 space-y-3"}>
+        {r.won !== null && (
+          <div className="flex items-center justify-between">
+            <p className="font-display font-bold text-base">{r.won ? 'Vitória' : 'Derrota'}</p>
+            <span className={"font-display font-bold text-sm " + (match.annulled ? "text-[var(--text-dim)] line-through" : r.mmrChange>0 ? "text-[var(--green)]" : "text-[var(--red)]")}>
+              {(r.mmrChange>0 ? '+' : '') + r.mmrChange} MMR
+            </span>
+          </div>
+        )}
+        <p className="text-xs text-[var(--text-dim)]">K {r.kills} · D {r.deaths} · HS {r.hs}</p>
+        {match.annulled && <p className="text-xs text-[var(--orange)]">Resultado anulado pelo ADM após contestação.</p>}
+        {match.disputeStatus==='rejeitada' && <p className="text-xs text-[var(--text-dim)]">Contestação rejeitada: resultado mantido.</p>}
+        {pending && <p className="text-xs text-[var(--blue)]">Contestação em análise pelo ADM.</p>}
+        {!match.annulled && !pending && match.disputeStatus!=='rejeitada' && r.won !== null && (
+          <button onClick={actions.contestResult} className="w-full py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--line)] font-display font-semibold text-sm active:scale-95 transition-transform">Contestar resultado</button>
+        )}
+        <button onClick={actions.leaveMatch} className="w-full py-2.5 rounded-lg bg-[var(--blue)] font-display font-semibold text-sm active:scale-95 transition-transform">Voltar para o Lobby</button>
+      </div>
+
+      <ReportButton targets={otherPlayers(match, user)} onReport={actions.openReport} />
+    </div>
+  );
+}
+
+function TeamGrid({ match, user }){
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <TeamCard title="Time A" color="var(--blue)" players={match.teamA} me={user.username} />
+      <TeamCard title="Time B" color="var(--orange)" players={match.teamB} me={user.username} />
+    </div>
+  );
+}
+
+function TeamCard({ title, color, players, me }){
+  return (
+    <div className={CARD + " p-3"}>
+      <p className="font-display font-bold text-sm mb-2" style={{color}}>{title}</p>
+      <ul className="space-y-1.5">
+        {players.map((p,i) => (
+          <li key={i} className="flex items-center gap-1.5 text-xs text-[var(--text-dim)]">
+            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{background: color}}></span>
+            <span className={p===me ? "text-[var(--text)] font-semibold" : ""}>{p}{p===me ? ' (você)' : ''}</span>
+          </li>
+        ))}
+        {players.length===0 && <li className="text-xs text-[var(--text-dim)]">—</li>}
+      </ul>
+    </div>
+  );
+}
+
+/* ====================== PERFIL ====================== */
+
+function PerfilTab({ user, st, canAdmin, others, actions }){
+  const chartHist = [...user.history].slice(0,10).reverse();
+  const karmaColor = user.karma>=50 ? 'var(--green)' : 'var(--red)';
+  return (
+    <div className="rise space-y-5">
+      <div className="flex items-center gap-4 mt-2">
+        <Avatar name={user.username} url={user.avatarUrl} size="w-16 h-16 text-2xl" />
+        <div className="min-w-0">
+          <p className="font-display font-bold text-xl truncate">{user.username}</p>
+          <p className="text-[var(--text-dim)] text-xs">ID Standoff 2: {user.sid}</p>
+          <p className="text-[var(--text-dim)] text-xs">Telefone: {maskPhone(user.phone)}</p>
+          <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+            {user.role!=='USER' && <span className="text-[10px] font-display font-bold px-2 py-0.5 rounded bg-[var(--blue)]/20 text-[var(--blue)]">{user.role}</span>}
+            <span className="text-[10px] font-display font-bold px-2 py-0.5 rounded bg-[var(--orange)]/20 text-[var(--orange)]">
+              {st.calibrated ? 'LVL ' + st.level : 'EM CALIBRAGEM'}
+            </span>
+            <span className="text-[10px] font-display font-bold px-2 py-0.5 rounded bg-[var(--surface-2)] text-[var(--text)]">{user.mmr} MMR</span>
+          </div>
+        </div>
+      </div>
+
+      <AvatarEditor current={user.avatarUrl} onSave={actions.setAvatar} />
+
+      <div className={CARD + " p-4"}>
+        <div className="flex items-center justify-between mb-2">
+          <p className="font-display font-semibold text-sm">Karma (reputação)</p>
+          <span className="font-display font-bold text-sm" style={{color: karmaColor}}>{user.karma}%</span>
+        </div>
+        <div className="w-full h-2 rounded-full bg-[var(--surface-2)] overflow-hidden">
+          <div className="h-full rounded-full transition-all" style={{width: user.karma+'%', background: karmaColor}}></div>
+        </div>
+        <p className="text-[11px] text-[var(--text-dim)] mt-2">
+          {user.karma>=50 ? 'Reputação em dia. Abaixo de 50% a busca por partidas é bloqueada.' : 'Karma abaixo de 50%: a busca por partidas está bloqueada.'}
+        </p>
+      </div>
+
+      {!st.calibrated && (
+        <div className={CARD + " p-4 border-[var(--orange)]/30"}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="font-display font-semibold text-sm text-[var(--orange)]">Partidas de Calibragem (MD10)</p>
+            <span className="font-display font-bold text-sm">{st.calCount}/10</span>
+          </div>
+          <div className="w-full h-2 rounded-full bg-[var(--surface-2)] overflow-hidden">
+            <div className="h-full bg-[var(--orange)] rounded-full transition-all" style={{width: (st.calCount*10)+'%'}}></div>
+          </div>
+          <p className="text-[11px] text-[var(--text-dim)] mt-2">O Level é destravado após completar as 10 partidas de calibragem.</p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-4 gap-2">
+        <StatBox label="K/D" value={st.kd.toFixed ? st.kd.toFixed(2) : st.kd} />
+        <StatBox label="Winrate" value={st.winrate + '%'} />
+        <StatBox label="Partidas" value={st.games} />
+        <StatBox label="HS% est." value={st.hsPct + '%'} />
+      </div>
+
+      <div className={CARD + " p-4 space-y-5"}>
+        <div>
+          <p className="font-display font-semibold text-sm mb-3">Variação de MMR (últimas 10)</p>
+          <MiniBars values={chartHist.map(h => h.mmrChange)} />
+        </div>
+        <div>
+          <p className="font-display font-semibold text-sm mb-3">K/D por partida (últimas 10)</p>
+          <LineChart values={chartHist.map(h => +(h.kills/Math.max(1,h.deaths)).toFixed(2))} />
+        </div>
+      </div>
+
+      <MapWinrate history={user.history} />
+
+      <div>
+        <p className="font-display font-semibold text-sm mb-2 text-[var(--text-dim)] uppercase tracking-wide">Histórico de partidas</p>
+        {user.history.length===0 ? (
+          <div className="text-center text-[var(--text-dim)] text-sm py-8 border border-dashed border-[var(--line)] rounded-xl">Nenhuma partida validada ainda</div>
+        ) : (
+          <ul className="space-y-2">
+            {user.history.map(h => (
+              <li key={h.matchId} className="flex items-center justify-between bg-[var(--surface)] border border-[var(--line)] rounded-lg px-3 py-2.5">
+                <div className="flex items-center gap-2.5">
+                  <span className={"w-2 h-2 rounded-full " + (h.result==='win' ? "bg-[var(--green)]" : "bg-[var(--red)]")}></span>
+                  <div>
+                    <p className="text-sm font-semibold">{h.result==='win' ? 'Vitória' : 'Derrota'} · {h.map}</p>
+                    <p className="text-[11px] text-[var(--text-dim)]">{h.date} · CT {h.ctScore} x {h.trScore} TR · K {h.kills} D {h.deaths}</p>
+                  </div>
+                </div>
+                <span className={"font-display font-bold text-sm " + (h.mmrChange>0 ? "text-[var(--green)]" : "text-[var(--red)]")}>
+                  {(h.mmrChange>0 ? '+' : '') + h.mmrChange}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="space-y-2.5">
+        <button onClick={() => actions.openReport(others)} className="w-full py-3 rounded-xl border border-[var(--red)]/40 text-[var(--red)] font-display font-semibold text-sm active:scale-95 transition-transform">
+          Denunciar Jogador
+        </button>
+        {canAdmin && (
+          <button onClick={actions.openAdmin} className="w-full py-3 rounded-xl bg-[var(--blue)]/15 border border-[var(--blue)]/40 text-[var(--blue)] font-display font-semibold text-sm active:scale-95 transition-transform">
+            Painel Administrativo
+          </button>
+        )}
+        <button onClick={actions.logout} className="w-full py-3 rounded-xl bg-[var(--surface-2)] border border-[var(--line)] text-[var(--text-dim)] font-display font-semibold text-sm active:scale-95 transition-transform">
+          Sair da conta
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AvatarEditor({ current, onSave }){
+  const [val, setVal] = useState(current || '');
+  useEffect(() => { setVal(current || ''); }, [current]);
+  return (
+    <div className={CARD + " p-4 space-y-2"}>
+      <label className="text-xs font-display font-semibold text-[var(--text-dim)]">URL da foto de perfil (https://)</label>
+      <div className="flex gap-2">
+        <input className="flex-1 bg-[var(--surface-2)] border border-[var(--line)] rounded-lg px-3 py-2 text-xs outline-none focus:border-[var(--blue)] min-w-0"
+          type="url" value={val} maxLength={300} placeholder="https://..." onChange={e => setVal(e.target.value)} />
+        <button onClick={() => onSave(val)} className="px-3 rounded-lg bg-[var(--blue)] font-display font-semibold text-xs active:scale-95 transition-transform">Salvar</button>
+      </div>
+      <p className="text-[10px] text-[var(--text-dim)]">Use uma imagem pública em HTTPS. Deixe vazio para remover.</p>
+    </div>
+  );
+}
+
+function StatBox({ label, value }){
+  return (
+    <div className="bg-[var(--surface)] border border-[var(--line)] rounded-xl py-3 text-center">
+      <p className="font-display font-bold text-base">{value}</p>
+      <p className="text-[9px] text-[var(--text-dim)] uppercase tracking-wide mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+function MapWinrate({ history }){
+  return (
+    <div className={CARD + " p-4 space-y-3"}>
+      <p className="font-display font-semibold text-sm">Winrate por mapa</p>
+      {MAPS.map(m => {
+        const games = history.filter(h => h.map===m.name);
+        const wins = games.filter(h => h.result==='win').length;
+        const pct = games.length ? Math.round(wins/games.length*100) : 0;
+        return (
+          <div key={m.id}>
+            <div className="flex justify-between text-xs mb-1">
+              <span>{m.name}</span>
+              <span className="text-[var(--text-dim)]">{games.length ? pct + '% · ' + wins + 'V ' + (games.length-wins) + 'D' : 'sem partidas'}</span>
+            </div>
+            <div className="w-full h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden">
+              <div className="h-full rounded-full transition-all" style={{width: pct+'%', background:'var(--blue)'}}></div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MiniBars({ values }){
+  if(values.length===0) return <p className="text-xs text-[var(--text-dim)] py-6 text-center">Sem dados ainda</p>;
+  const max = Math.max(80, ...values.map(v => Math.abs(v)));
+  return (
+    <div className="flex items-end gap-1.5 h-24">
+      {values.map((v,i) => (
+        <div key={i} className="flex-1 h-full flex flex-col justify-end">
+          <div className="w-full rounded-t" style={{height: Math.max(4, Math.abs(v)/max*100)+'%', background: v>=0 ? 'var(--green)' : 'var(--red)'}} title={String(v)}></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function LineChart({ values }){
+  if(values.length<2) return <p className="text-xs text-[var(--text-dim)] py-6 text-center">Jogue pelo menos 2 partidas</p>;
+  const w = 300, h = 90;
+  const max = Math.max(2, ...values) * 1.1;
+  const pts = values.map((v,i) => ({ x: (i/(values.length-1))*w, y: h - (v/max)*h }));
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-24 overflow-visible">
+      <polyline points={pts.map(p => `${p.x},${p.y}`).join(' ')} fill="none" stroke="var(--blue)" strokeWidth="2.5" />
+      {pts.map((p,i) => <circle key={i} cx={p.x} cy={p.y} r="3.5" fill="var(--blue)" />)}
+    </svg>
+  );
+}
+
+/* ====================== RANKING ====================== */
+
+function RankingTab({ db, user }){
+  const [sortMode, setSortMode] = useState('mmr'); // 'mmr' | 'winrate'
+  const rows = [
+    ...RANKING.map(r => ({ nick:r.nick, mmr:r.mmr, winrate:-1, label:'Level '+r.level, isMe:false })),
+    ...db.profiles.map(p => {
+      const s = getStats(p);
+      return { nick:p.username, mmr:p.mmr, winrate: s.games ? s.winrate : -1,
+        label: s.calibrated ? 'Level '+s.level : 'Em calibragem', isMe: p.id===user.id };
+    }),
+  ]
+    .sort((a,b) => sortMode==='mmr' ? b.mmr-a.mmr : (b.winrate-a.winrate) || (b.mmr-a.mmr))
+    .slice(0,6);
+
+  return (
+    <div className="rise">
+      <h2 className="font-display font-bold text-xl mt-2 mb-4">Top Jogadores</h2>
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <button onClick={() => setSortMode('mmr')} className={"rounded-lg py-2 text-xs font-bold " + (sortMode==='mmr' ? 'bg-[var(--blue)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-dim)]')}>Top Geral (MMR)</button>
+        <button onClick={() => setSortMode('winrate')} className={"rounded-lg py-2 text-xs font-bold " + (sortMode==='winrate' ? 'bg-[var(--blue)] text-white' : 'bg-[var(--surface-2)] text-[var(--text-dim)]')}>Mais Vitoriosos</button>
+      </div>
+      <ul className="space-y-2.5">
+        {rows.map((p,i) => (
+          <li key={i} className={"flex items-center gap-3 rounded-xl px-3 py-3 border " + (p.isMe ? "bg-[var(--blue)]/10 border-[var(--blue)]/40" : "bg-[var(--surface)] border-[var(--line)]")}>
+            <span className={"w-7 h-7 rounded-md flex items-center justify-center font-display font-bold text-sm flex-shrink-0 " +
+              (i===0 ? "bg-[var(--orange)] text-black" : i===1 ? "bg-[#C7CDD6] text-black" : i===2 ? "bg-[#B5793A] text-black" : "bg-[var(--surface-2)] text-[var(--text-dim)]")}>{i+1}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate">{p.nick}{p.isMe ? ' (você)' : ''}</p>
+              <p className="text-[11px] text-[var(--text-dim)]">{p.label}{p.winrate>=0 ? ' · ' + p.winrate + '% winrate' : ''}</p>
+            </div>
+            <span className="font-display font-bold text-sm">{sortMode==='mmr' ? p.mmr : (p.winrate>=0 ? p.winrate+'%' : '—')}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/* ====================== PAINEL ADM (renderizado só para OWNER/ADMIN) ====================== */
+
+function AdminPanel({ db, user, actions, onBack }){
+  const [section, setSection] = useState('partidas');
+  if(!isStaff(user)) return null; // defesa extra no nível de renderização
+  const pendingReports = db.reports.filter(r => r.status==='pendente').length;
+  const pendingDisputes = db.disputes.filter(d => d.status==='pendente').length;
+  const awaitingScore = db.matches.filter(m => m.phase==='aguardando_placar').length;
+  const sections = [
+    { id:'partidas', label:'Partidas', count: awaitingScore },
+    { id:'denuncias', label:'Denúncias', count: pendingReports },
+    { id:'contestacoes', label:'Contestações', count: pendingDisputes },
+    { id:'staff', label:'Staff', count: 0 },
+  ];
+  return (
+    <div className="rise space-y-4">
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="text-xs font-display text-[var(--text-dim)]">← Voltar ao perfil</button>
+        <span className="text-[10px] font-display font-bold px-2 py-0.5 rounded bg-[var(--blue)]/20 text-[var(--blue)]">{user.role}</span>
+      </div>
+      <h2 className="font-display font-bold text-xl">Painel Administrativo</h2>
+      {TEST_MODE && (
+        <div className="rounded-lg border border-[var(--orange)]/40 bg-[var(--orange)]/10 px-3 py-2 text-[11px] text-[var(--orange)]">
+          Modo de transição: controles de teste visíveis. Desligue TEST_MODE antes da produção.
+        </div>
+      )}
+
+      <div className="grid grid-cols-4 gap-1 bg-[var(--surface)] border border-[var(--line)] rounded-xl p-1">
+        {sections.map(s => (
+          <button key={s.id} onClick={() => setSection(s.id)}
+            className={"relative py-2 rounded-lg text-[11px] font-display font-bold transition-colors " + (section===s.id ? "bg-[var(--blue)] text-white" : "text-[var(--text-dim)]")}>
+            {s.label}
+            {s.count>0 && <span className="absolute -top-1 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[var(--orange)] text-black text-[9px] flex items-center justify-center">{s.count}</span>}
+          </button>
+        ))}
+      </div>
+
+      {section==='partidas' && <AdminMatches db={db} actions={actions} />}
+      {section==='denuncias' && <AdminReports db={db} actions={actions} />}
+      {section==='contestacoes' && <AdminDisputes db={db} actions={actions} />}
+      {section==='staff' && <AdminStaff db={db} user={user} actions={actions} />}
+    </div>
+  );
+}
+
+function EmptyBox({ text }){
+  return <div className="text-center text-[var(--text-dim)] text-sm py-8 border border-dashed border-[var(--line)] rounded-xl">{text}</div>;
+}
+
+function AdminMatches({ db, actions }){
+  return (
+    <div className="space-y-3">
+      {TEST_MODE && (
+        <button onClick={actions.createTestMatch} className="w-full py-2.5 rounded-xl border border-dashed border-[var(--orange)]/50 text-sm font-display font-semibold text-[var(--orange)] active:scale-95 transition-transform">
+          + [TESTE] Criar partida com 10 bots
+        </button>
+      )}
+      {db.matches.length===0 && <EmptyBox text="Nenhuma partida registrada ainda" />}
+      {db.matches.map(m => (
+        <MatchAdminRow key={m.id} match={m} onSave={actions.setRoomLink} onScore={actions.submitScore} />
+      ))}
+    </div>
+  );
+}
+
+function canScore(m){
+  return m.phase==='aguardando_placar' || (m.ownerId===null && m.phase==='ready');
+}
+
+function MatchAdminRow({ match, onSave, onScore }){
+  const [link, setLink] = useState(match.roomLink || '');
+  const [linkErr, setLinkErr] = useState('');
+  const phaseLabel = {
+    veto:'Veto', picking:'Escolha de jogadores', ready:'Sala montada',
+    aguardando_placar:'Aguardando placar', finalizada: match.annulled ? 'Anulada' : 'Finalizada',
+  }[match.phase];
+
+  function saveLink(){
+    const v = link.trim();
+    if(!isValidRoomLink(v)){ setLinkErr('Link inválido: use um endereço https:// ou intent:// válido, sem espaços'); return; }
+    setLinkErr('');
+    onSave(match.id, v);
+  }
+
+  return (
+    <div className={CARD + " p-4 space-y-3"}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-display font-bold text-sm truncate">{match.ownerNick}</p>
+          <p className="text-[11px] text-[var(--text-dim)]">{match.map ? mapName(match.map) : 'Mapa em veto'} · {phaseLabel}</p>
+        </div>
+        <span className={"text-[10px] font-display font-bold px-2 py-0.5 rounded flex-shrink-0 " + (isValidRoomLink(match.roomLink) ? "bg-[var(--green)]/15 text-[var(--green)]" : "bg-[var(--surface-2)] text-[var(--text-dim)]")}>
+          {isValidRoomLink(match.roomLink) ? 'Link ok' : 'Sem link'}
+        </span>
+      </div>
+
+      {match.phase!=='finalizada' && (
+        <>
+          <div className="flex gap-2">
+            <input value={link} onChange={e => setLink(e.target.value)} maxLength={300} placeholder="Cole o link oficial da sala"
+              className="flex-1 bg-[var(--surface-2)] border border-[var(--line)] rounded-lg px-3 py-2 text-xs outline-none focus:border-[var(--blue)] min-w-0" />
+            <button onClick={saveLink} className="px-3 rounded-lg bg-[var(--blue)] font-display font-semibold text-sm active:scale-95 transition-transform">Salvar</button>
+          </div>
+          {linkErr && <p className="text-xs text-[var(--red)]">{linkErr}</p>}
+        </>
+      )}
+
+      {canScore(match) && <ScoreForm match={match} onScore={onScore} />}
+
+      {match.phase==='finalizada' && match.result && (
+        <div className="rounded-lg bg-[var(--surface-2)] px-3 py-2 text-xs">
+          <span className="font-display font-bold">CT {match.result.ctScore} x {match.result.trScore} TR</span>
+          <span className="text-[var(--text-dim)]"> · Time A começou em {match.result.aStartsCT ? 'CT' : 'TR'} · vencedor: Time {match.result.winnerTeam}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ScoreForm({ match, onScore }){
+  const [aSide, setASide] = useState('CT');
+  const [ct, setCt] = useState('');
+  const [tr, setTr] = useState('');
+  const [err, setErr] = useState('');
+
+  function submit(){
+    const e = validateScore(ct, tr);
+    if(e){ setErr(e); return; }
+    setErr('');
+    onScore(match.id, aSide, Number(ct), Number(tr));
+  }
+
+  function fillRandom(){
+    const winnerIsCT = Math.random() < 0.5;
+    const loser = String(rand(0,12));
+    setASide(Math.random() < 0.5 ? 'CT' : 'TR');
+    setCt(winnerIsCT ? '13' : loser);
+    setTr(winnerIsCT ? loser : '13');
+    setErr('');
+  }
+
+  return (
+    <div className="rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-3 space-y-3">
+      <p className="font-display font-bold text-xs">Lançar placar final</p>
+
+      <div>
+        <p className="text-[11px] text-[var(--text-dim)] mb-1.5">Time A começou no lado:</p>
+        <div className="grid grid-cols-2 gap-2">
+          {['CT','TR'].map(s => (
+            <button key={s} onClick={() => setASide(s)}
+              className={"py-2 rounded-lg text-xs font-display font-bold border " +
+                (aSide===s ? (s==='CT' ? "bg-[var(--blue)]/20 border-[var(--blue)] text-[var(--blue)]" : "bg-[var(--orange)]/20 border-[var(--orange)] text-[var(--orange)]") : "bg-[var(--surface)] border-[var(--line)] text-[var(--text-dim)]")}>
+              {s}
+            </button>
+          ))}
+        </div>
+        <p className="text-[10px] text-[var(--text-dim)] mt-1.5">Time B começou no lado oposto ({aSide==='CT' ? 'TR' : 'CT'}).</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-[11px] text-[var(--blue)] font-display font-bold mb-1">CT</p>
+          <input value={ct} onChange={e => setCt(e.target.value.replace(/\D/g,'').slice(0,2))} inputMode="numeric" placeholder="0–13"
+            className="w-full bg-[var(--surface)] border border-[var(--line)] rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--blue)]" />
+        </div>
+        <div>
+          <p className="text-[11px] text-[var(--orange)] font-display font-bold mb-1">TR</p>
+          <input value={tr} onChange={e => setTr(e.target.value.replace(/\D/g,'').slice(0,2))} inputMode="numeric" placeholder="0–13"
+            className="w-full bg-[var(--surface)] border border-[var(--line)] rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--orange)]" />
+        </div>
+      </div>
+      <p className="text-[10px] text-[var(--text-dim)]">Um dos lados deve ter 13 rodadas e o outro de 0 a 12.</p>
+
+      {err && <p className="text-xs text-[var(--red)]">{err}</p>}
+
+      <div className="flex gap-2">
+        {TEST_MODE && (
+          <button onClick={fillRandom} className="px-3 py-2 rounded-lg border border-dashed border-[var(--orange)]/50 text-[11px] font-display font-semibold text-[var(--orange)] active:scale-95 transition-transform">[TESTE] Preencher</button>
+        )}
+        <button onClick={submit} className="flex-1 py-2 rounded-lg bg-[var(--green)]/20 border border-[var(--green)]/40 text-[var(--green)] font-display font-bold text-sm active:scale-95 transition-transform">
+          Confirmar placar e distribuir MMR
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AdminReports({ db, actions }){
+  const list = [...db.reports].sort((a,b) => (a.status==='pendente' ? -1 : 1) - (b.status==='pendente' ? -1 : 1));
+  return (
+    <div className="space-y-3">
+      {TEST_MODE && (
+        <button onClick={actions.createTestReport} className="w-full py-2.5 rounded-xl border border-dashed border-[var(--orange)]/50 text-sm font-display font-semibold text-[var(--orange)] active:scale-95 transition-transform">
+          + [TESTE] Simular denúncia contra minha conta
+        </button>
+      )}
+      {list.length===0 && <EmptyBox text="Nenhuma denúncia na fila" />}
+      {list.map(r => (
+        <div key={r.id} className={CARD + " p-4"}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-semibold text-sm">{CATEGORIES[r.category].label}</p>
+              <p className="text-[11px] text-[var(--text-dim)]">Alvo: <span className="text-[var(--text)]">{r.targetNick}</span> · Reportado por {r.reporter}</p>
+            </div>
+            <span className={"text-[10px] font-display font-bold px-2 py-0.5 rounded flex-shrink-0 " +
+              (r.status==='pendente' ? "bg-[var(--orange)]/15 text-[var(--orange)]" : r.status==='confirmada' ? "bg-[var(--red)]/15 text-[var(--red)]" : "bg-[var(--surface-2)] text-[var(--text-dim)]")}>
+              {r.status.toUpperCase()}
+            </span>
+          </div>
+          {r.status==='pendente' && (
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => actions.decideReport(r.id, true)} className="flex-1 py-2 rounded-lg bg-[var(--red)]/15 border border-[var(--red)]/40 text-[var(--red)] font-display font-semibold text-xs active:scale-95 transition-transform">
+                Confirmar (−{CATEGORIES[r.category].penalty}% Karma)
+              </button>
+              <button onClick={() => actions.decideReport(r.id, false)} className="flex-1 py-2 rounded-lg bg-[var(--surface-2)] border border-[var(--line)] font-display font-semibold text-xs active:scale-95 transition-transform">
+                Descartar
+              </button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AdminDisputes({ db, actions }){
+  const list = [...db.disputes].sort((a,b) => (a.status==='pendente' ? -1 : 1) - (b.status==='pendente' ? -1 : 1));
+  return (
+    <div className="space-y-3">
+      {list.length===0 && <EmptyBox text="Nenhuma contestação pendente" />}
+      {list.map(d => {
+        const m = db.matches.find(x => x.id===d.matchId);
+        return (
+          <div key={d.id} className={CARD + " p-4"}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-semibold text-sm">Resultado contestado por {d.username}</p>
+                <p className="text-[11px] text-[var(--text-dim)]">
+                  {m && m.result ? `CT ${m.result.ctScore} x ${m.result.trScore} TR · vencedor: Time ${m.result.winnerTeam} · ${m.result.mmrChange>0 ? '+' : ''}${m.result.mmrChange} MMR` : 'Partida não encontrada'}
+                </p>
+              </div>
+              <span className={"text-[10px] font-display font-bold px-2 py-0.5 rounded flex-shrink-0 " +
+                (d.status==='pendente' ? "bg-[var(--orange)]/15 text-[var(--orange)]" : d.status==='aprovada' ? "bg-[var(--red)]/15 text-[var(--red)]" : "bg-[var(--surface-2)] text-[var(--text-dim)]")}>
+                {d.status.toUpperCase()}
+              </span>
+            </div>
+            {d.status==='pendente' && (
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => actions.decideDispute(d.id, true)} className="flex-1 py-2 rounded-lg bg-[var(--red)]/15 border border-[var(--red)]/40 text-[var(--red)] font-display font-semibold text-xs active:scale-95 transition-transform">Aprovar (anula)</button>
+                <button onClick={() => actions.decideDispute(d.id, false)} className="flex-1 py-2 rounded-lg bg-[var(--green)]/15 border border-[var(--green)]/40 text-[var(--green)] font-display font-semibold text-xs active:scale-95 transition-transform">Rejeitar (mantém)</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function AdminStaff({ db, user, actions }){
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-[var(--text-dim)]">Somente o OWNER pode promover ou remover ADMINs.</p>
+      {db.profiles.length===0 && <EmptyBox text="Nenhuma conta cadastrada" />}
+      {db.profiles.map(p => {
+        const karmaColor = p.karma>=50 ? 'var(--green)' : 'var(--red)';
+        return (
+          <div key={p.id} className={CARD + " p-4 flex items-center gap-3"}>
+            <Avatar name={p.username} url={p.avatarUrl} size="w-10 h-10 text-sm" />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm truncate">{p.username}</p>
+              <p className="text-[11px] text-[var(--text-dim)]">
+                <span style={{color: karmaColor}}>Karma {p.karma}%</span> · {p.mmr} MMR
+              </p>
+            </div>
+            <span className="text-[10px] font-display font-bold px-2 py-0.5 rounded bg-[var(--surface-2)] text-[var(--text-dim)]">{p.role}</span>
+            {user.role==='OWNER' && p.role!=='OWNER' && (
+              <button onClick={() => actions.setRole(p.id, p.role==='ADMIN' ? 'USER' : 'ADMIN')}
+                className="text-[10px] font-display font-bold px-2 py-1 rounded-lg bg-[var(--blue)]/15 border border-[var(--blue)]/40 text-[var(--blue)] active:scale-95 transition-transform">
+                {p.role==='ADMIN' ? 'Remover' : 'Promover'}
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ====================== DENÚNCIA ====================== */
+
+function ReportModal({ targets, preset, onClose, onSubmit }){
+  const [target, setTarget] = useState(preset || '');
+  const [cat, setCat] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center px-4 py-6" onClick={onClose}>
+      <div className={CARD + " w-full max-w-md p-5 rise"} onClick={e => e.stopPropagation()}>
+        <p className="font-display font-bold text-lg mb-1">Denunciar Jogador</p>
+        <p className="text-[11px] text-[var(--text-dim)] mb-4">A denúncia vai para a fila de análise do ADM.</p>
+
+        <p className="text-[11px] font-display uppercase tracking-wide text-[var(--text-dim)] mb-2">Jogador</p>
+        {targets.length===0 ? (
+          <p className="text-xs text-[var(--text-dim)] mb-4">Nenhum outro jogador disponível.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2 mb-4">
+            {targets.map(t => (
+              <button key={t} onClick={() => setTarget(t)}
+                className={"px-3 py-1.5 rounded-full text-xs font-semibold border " + (target===t ? "bg-[var(--red)]/20 border-[var(--red)] text-[var(--red)]" : "bg-[var(--surface-2)] border-[var(--line)]")}>
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <p className="text-[11px] font-display uppercase tracking-wide text-[var(--text-dim)] mb-2">Motivo</p>
+        <div className="grid grid-cols-2 gap-2 mb-5">
+          {Object.entries(CATEGORIES).map(([k,c]) => (
+            <button key={k} onClick={() => setCat(k)}
+              className={"py-2.5 rounded-lg text-xs font-semibold border " + (cat===k ? "bg-[var(--red)]/20 border-[var(--red)] text-[var(--red)]" : "bg-[var(--surface-2)] border-[var(--line)]")}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex gap-2.5">
+          <button onClick={onClose} className="flex-1 py-2.5 rounded-lg bg-[var(--surface-2)] border border-[var(--line)] font-display font-semibold text-sm active:scale-95 transition-transform">Cancelar</button>
+          <button disabled={!target || !cat} onClick={() => onSubmit(target, cat)}
+            className="flex-1 py-2.5 rounded-lg bg-[var(--red)] font-display font-semibold text-sm active:scale-95 transition-transform disabled:opacity-40">
+            Enviar denúncia
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ====================== NAV ====================== */
+
+function BottomNav({ tab, setTab, matchActive }){
+  const items = [
+    { id:'jogar', label:'Jogar', icon:'⚔' },
+    { id:'partida', label:'Partida', icon:'🗺' },
+    { id:'perfil', label:'Perfil', icon:'◉' },
+    { id:'ranking', label:'Ranking', icon:'▲' },
+  ];
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 z-20 max-w-md mx-auto border-t border-[var(--line)] bg-[#0A0D12]/95 backdrop-blur-md" style={{paddingBottom:'env(safe-area-inset-bottom, 10px)'}}>
+      <div className="grid grid-cols-4">
+        {items.map(it => (
+          <button key={it.id} onClick={() => setTab(it.id)} className="relative flex flex-col items-center justify-center gap-1 py-2.5 active:scale-95 transition-transform">
+            {it.id==='partida' && matchActive && <span className="absolute top-1.5 right-[28%] w-1.5 h-1.5 rounded-full bg-[var(--orange)]"></span>}
+            <span className={"text-lg " + (tab===it.id ? "text-[var(--blue)]" : "text-[var(--text-dim)]")}>{it.icon}</span>
+            <span className={"text-[10px] font-display font-semibold " + (tab===it.id ? "text-[var(--blue)]" : "text-[var(--text-dim)]")}>{it.label}</span>
+          </button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
