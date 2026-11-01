@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>S02 CompClub — Staff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#0d1117; --surface:#161b22; --surface2:#1c2330; --line:#30363d;
+    --text:#e6edf3; --dim:#8b949e; --accent:#2f81f7; --orange:#f0883e;
+    --green:#3fb950; --red:#f85149;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;margin:0;-webkit-tap-highlight-color:transparent}
+  .display{font-family:'Rajdhani','Inter',sans-serif;letter-spacing:.02em}
+  ::-webkit-scrollbar{display:none}
+  .noscroll{-ms-overflow-style:none;scrollbar-width:none}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px}
+  .btn{transition:transform .08s,opacity .2s}
+  .btn:active{transform:scale(.97)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .spin{animation:spin .8s linear infinite}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .rise{animation:rise .25s ease-out both}
+  .safe-top{padding-top:env(safe-area-inset-top,0px)}
+  .safe-bottom{padding-bottom:env(safe-area-inset-bottom,0px)}
+</style>
+</head>
+<body>
+<div id="root"><p style="padding:40px;text-align:center;color:#8b949e;font-family:sans-serif">Carregando…</p></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback } = React;
+
+/* ===================== CONFIGURAÇÃO =====================
+   Esta página NÃO tem poder próprio. Toda ação passa por funções do banco
+   que conferem o cargo de quem está logado. Sem cargo de staff, o Supabase recusa. */
+const SB_URL = "https://ncvjrgjasllevthjyibi.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jdmpyZ2phc2xsZXZ0aGp5aWJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0MjQ2NjgsImV4cCI6MjEwOTAwMDY2OH0._lq7kIUU_UzF7GCyIgvacBB6BEVHjSmXaTg2SdbTsUg";
+// sessão do staff separada da do site público
+const sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, autoRefreshToken: true, storageKey: 'sb-s02-staff-auth' } });
+
+const EMAIL_DOMAIN = "contas.s02faceit.com";
+const emailFor = u => `${u.trim().toLowerCase()}@${EMAIL_DOMAIN}`;
+const MAPS = { sandstone:'Sandstone', rust:'Rust', province:'Province', breeze:'Breeze', prison:'Prison', dune:'Dune', hanami:'Hanami' };
+const CATS = { toxic:'Toxidade', cheat:'Uso de Cheat/Hack', afk:'Ausente/AFK', noroom:'Não entrou na sala' };
+const PENALTY = { cheat:20, toxic:8, afk:6, noroom:6 };
+const STATUS = {
+  aguardando_sala:['Aguardando sala','var(--orange)'], sala_liberada:['Sala liberada','var(--accent)'],
+  aguardando_placar:['Aguardando placar','var(--orange)'], finalizada:['Finalizada','var(--green)'], anulada:['Anulada','var(--dim)'],
+};
+const LINK_RE = /^(https:\/\/[^\s]+\.[^\s]+|intent:\/\/[^\s]+)$/i;
+const INPUT = "w-full bg-[#0d1117] border border-[var(--line)] rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--accent)]";
+
+async function rpc(name, args){
+  const { data, error } = await sb.rpc(name, args);
+  if(error) throw error;
+  return data;
+}
+const fmt = d => d ? new Date(d).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' }) : '—';
+const short = id => String(id).slice(0, 8);
+function msg(e){
+  const m = (e && e.message) || String(e);
+  if(/Invalid login credentials/i.test(m)) return 'Usuário ou senha inválidos.';
+  if(/Failed to fetch/i.test(m)) return 'Sem conexão com o servidor.';
+  if(/Acesso negado/i.test(m)) return 'Você não tem permissão para esta ação.';
+  return m;
+}
+
+/* ===================== BASE ===================== */
+function Spinner({ size = 18 }){
+  return <div style={{width:size,height:size}} className="spin rounded-full border-2 border-[var(--line)] border-t-[var(--accent)]" />;
+}
+function Badge({ children, color = 'var(--dim)' }){
+  return <span className="text-[10px] display font-bold px-1.5 py-0.5 rounded" style={{color, background:'color-mix(in srgb, '+color+' 15%, transparent)', border:'1px solid color-mix(in srgb, '+color+' 35%, transparent)'}}>{children}</span>;
+}
+function Empty({ children }){
+  return <div className="card p-6 text-center text-xs text-[var(--dim)]">{children}</div>;
+}
+function Toasts({ toasts }){
+  const c = { success:'var(--green)', error:'var(--red)', info:'var(--accent)' };
+  return (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-[92%] max-w-sm space-y-2 pointer-events-none" aria-live="polite">
+      {toasts.map(t => <div key={t.id} className="rise card px-3.5 py-2.5 text-sm shadow-lg" style={{borderColor:c[t.type]}}>{t.msg}</div>)}
+    </div>
+  );
+}
+
+function useLoad(fn, deps, every){
+  const [st, setSt] = useState({ data:null, loading:true, error:'' });
+  const reload = useCallback(async () => {
+    try{ const d = await fn(); setSt({ data:d, loading:false, error:'' }); }
+    catch(e){ setSt(s => ({ ...s, loading:false, error:msg(e) })); }
+  }, deps);
+  useEffect(() => {
+    setSt(s => ({ ...s, loading:true }));
+    reload();
+    if(!every) return;
+    const t = setInterval(reload, every);
+    return () => clearInterval(t);
+  }, [reload]);
+  return { ...st, reload };
+}
+
+function Loader({ st, children }){
+  if(st.loading && st.data === null) return <div className="flex justify-center py-10"><Spinner size={24} /></div>;
+  if(st.error && st.data === null) return <Empty><span className="text-[var(--red)]">{st.error}</span></Empty>;
+  return children(st.data);
+}
+
+/* formulário compacto reutilizável */
+function MiniForm({ fields, label, danger, onSubmit, disabled }){
+  const init = () => Object.fromEntries(fields.map(f => [f.key, f.default ?? '']));
+  const [v, setV] = useState(init);
+  const [busy, setBusy] = useState(false);
+  const ready = fields.every(f => f.optional || String(v[f.key]).trim() !== '');
+  async function go(){
+    setBusy(true);
+    const ok = await onSubmit(v);
+    setBusy(false);
+    if(ok) setV(init());
+  }
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {fields.map(f => f.options ? (
+          <select key={f.key} className={INPUT} value={v[f.key]} onChange={e => setV({ ...v, [f.key]: e.target.value })} aria-label={f.label}>
+            {f.options.map(([val, txt]) => <option key={val} value={val}>{txt}</option>)}
+          </select>
+        ) : (
+          <input key={f.key} className={INPUT} value={v[f.key]} placeholder={f.label} aria-label={f.label}
+            inputMode={f.numeric ? 'numeric' : undefined} maxLength={f.max || 200}
+            onChange={e => setV({ ...v, [f.key]: f.numeric ? e.target.value.replace(/[^0-9-]/g, '') : e.target.value })} />
+        ))}
+      </div>
+      <button onClick={go} disabled={!ready || busy || disabled}
+        className={"btn px-3 py-2 rounded-lg text-xs display font-bold flex items-center gap-2 " + (danger ? "bg-[var(--red)] text-white" : "bg-[var(--accent)] text-white")}>
+        {busy && <Spinner size={12} />}{label}
+      </button>
+    </div>
+  );
+}
+
+/* ===================== LOGIN ===================== */
+function Login({ onLogin, denied }){
+  const [u, setU] = useState('');
+  const [p, setP] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function go(){
+    setErr(''); setBusy(true);
+    try{
+      const { error } = await sb.auth.signInWithPassword({ email: emailFor(u), password: p });
+      if(error) throw error;
+      onLogin();
+    } catch(e){ setErr(msg(e)); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 safe-top safe-bottom">
+      <div className="w-full max-w-sm rise">
+        <div className="text-center mb-6">
+          <h1 className="display font-bold text-2xl">S02 CompClub</h1>
+          <p className="text-[var(--dim)] text-xs mt-1">Painel da equipe</p>
+        </div>
+        <div className="card p-5 space-y-3">
+          <label className="block text-[11px] text-[var(--dim)] uppercase tracking-wide">Usuário
+            <input className={INPUT + " mt-1"} value={u} onChange={e => setU(e.target.value)} autoCapitalize="none" autoComplete="username" maxLength={16} />
+          </label>
+          <label className="block text-[11px] text-[var(--dim)] uppercase tracking-wide">Senha
+            <input className={INPUT + " mt-1"} type="password" value={p} onChange={e => setP(e.target.value)} autoComplete="current-password" maxLength={72}
+              onKeyDown={e => { if(e.key === 'Enter' && u && p) go(); }} />
+          </label>
+          {(err || denied) && <p role="alert" className="text-xs text-[var(--red)]">{err || denied}</p>}
+          <button onClick={go} disabled={!u || !p || busy} className="btn w-full py-2.5 rounded-lg bg-[var(--accent)] display font-bold flex items-center justify-center gap-2">
+            {busy && <Spinner size={14} />}Entrar
+          </button>
+        </div>
+        <p className="text-[11px] text-[var(--dim)] text-center mt-4">Acesso restrito. Use a mesma conta do site.</p>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== APP ===================== */
+const TABS = [
+  ['resumo','Resumo'], ['partidas','Partidas'], ['denuncias','Denúncias'],
+  ['contestacoes','Contestações'], ['jogadores','Jogadores'], ['equipe','Equipe'], ['registro','Registro'],
+];
+
+function App(){
+  const [session, setSession] = useState(undefined);
+  const [me, setMe] = useState(null);
+  const [denied, setDenied] = useState('');
+  const [tab, setTab] = useState('resumo');
+  const [toasts, setToasts] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  const notify = (m, type = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts(t => [...t, { id, msg:m, type }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
+  };
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = sb.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if(!session){ setMe(null); return; }
+    let alive = true;
+    rpc('staff_eu').then(d => { if(alive){ setMe(d); setDenied(''); } })
+      .catch(async e => {
+        if(!alive) return;
+        if(/Acesso negado/i.test(e.message || '')){
+          setDenied('Esta conta não tem permissão de staff.');
+          await sb.auth.signOut();
+        } else { setDenied(msg(e)); }
+      });
+    return () => { alive = false; };
+  }, [session && session.user && session.user.id]);
+
+  async function act(fn, okMsg){
+    setBusy(true);
+    try{ await fn(); if(okMsg) notify(okMsg, 'success'); return true; }
+    catch(e){ notify(msg(e), 'error'); return false; }
+    finally { setBusy(false); }
+  }
+
+  if(session === undefined) return <div className="min-h-screen flex items-center justify-center"><Spinner size={28} /></div>;
+  if(!session) return <><Toasts toasts={toasts} /><Login onLogin={() => {}} denied={denied} /></>;
+  if(!me) return <div className="min-h-screen flex items-center justify-center"><Spinner size={28} /></div>;
+
+  const can = { act: me.role === 'ADMIN' || me.role === 'OWNER', owner: me.role === 'OWNER' };
+  const tabs = TABS.filter(([id]) => id !== 'registro' || can.act);
+  const ctx = { me, can, act, busy, notify, go: setTab };
+
+  return (
+    <div className="min-h-screen max-w-3xl mx-auto flex flex-col safe-top safe-bottom">
+      <Toasts toasts={toasts} />
+      <header className="sticky top-0 z-20 bg-[#0d1117]/95 backdrop-blur border-b border-[var(--line)] px-4 pt-3">
+        <div className="flex items-center gap-3 pb-2">
+          <div className="min-w-0 flex-1">
+            <p className="display font-bold leading-tight">Painel da equipe</p>
+            <p className="text-[11px] text-[var(--dim)] truncate">{me.username} · <span className="text-[var(--accent)]">{me.role}</span></p>
+          </div>
+          <button onClick={() => sb.auth.signOut()} className="btn text-xs text-[var(--dim)] border border-[var(--line)] rounded-lg px-3 py-1.5">Sair</button>
+        </div>
+        <nav className="flex gap-1 overflow-x-auto noscroll pb-2" aria-label="Seções">
+          {tabs.map(([id, l]) => (
+            <button key={id} onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}
+              className={"btn px-3 py-1.5 rounded-lg text-xs display font-bold whitespace-nowrap " + (tab === id ? "bg-[var(--accent)] text-white" : "text-[var(--dim)] border border-[var(--line)]")}>{l}</button>
+          ))}
+        </nav>
+      </header>
+
+      <main className="flex-1 px-4 py-4 pb-16">
+        {tab === 'resumo' && <Resumo ctx={ctx} />}
+        {tab === 'partidas' && <Partidas ctx={ctx} />}
+        {tab === 'denuncias' && <Denuncias ctx={ctx} />}
+        {tab === 'contestacoes' && <Contestacoes ctx={ctx} />}
+        {tab === 'jogadores' && <Jogadores ctx={ctx} />}
+        {tab === 'equipe' && <Equipe ctx={ctx} />}
+        {tab === 'registro' && can.act && <Registro />}
+      </main>
+    </div>
+  );
+}
+
+/* ===================== RESUMO ===================== */
+function Resumo({ ctx }){
+  const st = useLoad(() => rpc('staff_resumo'), [], 15000);
+  return (
+    <Loader st={st}>{d => {
+      const items = [
+        ['Aguardando sala', d.aguardando_sala, 'partidas', 'Partidas sem link da sala'],
+        ['Aguardando placar', d.aguardando_placar, 'partidas', 'Partidas encerradas pelos jogadores'],
+        ['Denúncias', d.denuncias, 'denuncias', 'Pendentes de análise'],
+        ['Contestações', d.contestacoes, 'contestacoes', 'Pendentes de decisão'],
+        ['Na fila agora', d.na_fila, null, 'Jogadores procurando partida'],
+        ['Em jogo', d.sala_liberada, 'partidas', 'Salas liberadas'],
+        ['Jogadores', d.jogadores, 'jogadores', 'Contas cadastradas'],
+      ];
+      return (
+        <div className="rise space-y-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {items.map(([t, n, go, hint]) => (
+              <button key={t} disabled={!go} onClick={() => go && ctx.go(go)}
+                className={"card p-4 text-left btn " + (n > 0 && go && ['Aguardando sala','Aguardando placar','Denúncias','Contestações'].includes(t) ? "border-[var(--orange)]" : "")}>
+                <p className="display font-bold text-3xl">{n}</p>
+                <p className="text-sm font-semibold">{t}</p>
+                <p className="text-[11px] text-[var(--dim)]">{hint}</p>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-[var(--dim)]">Atualiza sozinho a cada 15 segundos.</p>
+        </div>
+      );
+    }}</Loader>
+  );
+}
+
+/* ===================== PARTIDAS ===================== */
+function Partidas({ ctx }){
+  const [f, setF] = useState('aguardando_sala');
+  const st = useLoad(() => rpc('staff_listar_partidas', { p_status: f }), [f], 15000);
+  const filters = [['aguardando_sala','Sem sala'],['sala_liberada','Em jogo'],['aguardando_placar','Aguardando placar'],['finalizada','Finalizadas'],['anulada','Anuladas'],['todas','Todas']];
+  return (
+    <div className="rise space-y-3">
+      <div className="flex gap-1 overflow-x-auto noscroll">
+        {filters.map(([id, l]) => (
+          <button key={id} onClick={() => setF(id)} aria-pressed={f === id}
+            className={"btn px-3 py-1.5 rounded-lg text-xs whitespace-nowrap " + (f === id ? "bg-[var(--surface2)] border border-[var(--accent)]" : "border border-[var(--line)] text-[var(--dim)]")}>{l}</button>
+        ))}
+      </div>
+      <Loader st={st}>{list => list.length === 0 ? <Empty>Nenhuma partida neste filtro.</Empty> : (
+        <div className="space-y-3">{list.map(m => <MatchCard key={m.id} m={m} ctx={ctx} reload={st.reload} />)}</div>
+      )}</Loader>
+    </div>
+  );
+}
+
+function MatchCard({ m, ctx, reload }){
+  const { can, act } = ctx;
+  const [label, color] = STATUS[m.status] || [m.status, 'var(--dim)'];
+  const players = m.jogadores || [];
+  const teams = { A: players.filter(p => p.team === 'A'), B: players.filter(p => p.team === 'B') };
+  const open = ['aguardando_sala','sala_liberada','aguardando_placar'].includes(m.status);
+  const [link, setLink] = useState(m.room_link || '');
+  const linkOk = link.length <= 300 && LINK_RE.test(link.trim());
+
+  return (
+    <div className="card p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="display font-bold">{MAPS[m.map] || m.map} <span className="text-[var(--dim)] text-xs font-normal">#{short(m.id)}</span></p>
+          <p className="text-[11px] text-[var(--dim)]">{fmt(m.created_at)}</p>
+        </div>
+        <Badge color={color}>{label}</Badge>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {['A','B'].map(t => (
+          <div key={t} className="rounded-lg bg-[#0d1117] border border-[var(--line)] p-2">
+            <p className="display font-bold text-xs mb-1" style={{color: t === 'A' ? 'var(--accent)' : 'var(--orange)'}}>Time {t}</p>
+            <ul className="space-y-1">
+              {teams[t].map(p => (
+                <li key={p.user_id} className="text-[11px] flex justify-between gap-2">
+                  <span className="truncate">{p.username} <span className="text-[var(--dim)]">({p.sid})</span></span>
+                  <span className="text-[var(--dim)] whitespace-nowrap">
+                    {m.status === 'finalizada' && p.kills !== null ? `${p.kills}/${p.deaths} ` : ''}
+                    {m.status === 'finalizada' && p.mmr_change !== null ? <span style={{color: p.mmr_change > 0 ? 'var(--green)' : 'var(--red)'}}>{p.mmr_change > 0 ? '+' : ''}{p.mmr_change}</span> : p.mmr}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      {m.status === 'finalizada' && (
+        <p className="text-xs">CT <b>{m.ct_score}</b> x <b>{m.tr_score}</b> TR · Time A começou em {m.team_a_starts_ct ? 'CT' : 'TR'} · vencedor: <b>Time {m.winner_team}</b></p>
+      )}
+
+      {can.act && (m.status === 'aguardando_sala' || m.status === 'sala_liberada') && (
+        <div className="space-y-2">
+          <p className="text-[11px] text-[var(--dim)] uppercase tracking-wide">Link oficial da sala</p>
+          <div className="flex gap-2">
+            <input className={INPUT} value={link} onChange={e => setLink(e.target.value)} maxLength={300} placeholder="https://… ou intent://…" />
+            <button disabled={!linkOk || ctx.busy} className="btn px-3 rounded-lg bg-[var(--accent)] text-xs display font-bold whitespace-nowrap"
+              onClick={async () => { if(await act(() => rpc('definir_link_sala', { p_match: m.id, p_link: link.trim() }), 'Sala liberada para os jogadores')) reload(); }}>
+              {m.status === 'sala_liberada' ? 'Atualizar' : 'Liberar sala'}
+            </button>
+          </div>
+          {link && !linkOk && <p className="text-[11px] text-[var(--red)]">Link inválido: use https:// ou intent:// sem espaços.</p>}
+        </div>
+      )}
+
+      {can.act && (m.status === 'sala_liberada' || m.status === 'aguardando_placar') && <ScoreForm m={m} players={players} ctx={ctx} reload={reload} />}
+
+      {can.act && open && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-[var(--dim)]">Cancelar partida</summary>
+          <div className="mt-2">
+            <p className="text-[11px] text-[var(--dim)] mb-2">Anula a partida sem mexer no MMR de ninguém. Use quando a partida não vai acontecer.</p>
+            <MiniForm label="Cancelar partida" danger fields={[{ key:'motivo', label:'Motivo (obrigatório)' }]}
+              onSubmit={async v => { const ok = await act(() => rpc('cancelar_partida', { p_match: m.id, p_motivo: v.motivo }), 'Partida cancelada'); if(ok) reload(); return ok; }} />
+          </div>
+        </details>
+      )}
+      {!can.act && open && <p className="text-[11px] text-[var(--dim)]">Somente ADMIN ou OWNER podem agir nesta partida.</p>}
+    </div>
+  );
+}
+
+function ScoreForm({ m, players, ctx, reload }){
+  const [aCT, setACT] = useState(true);
+  const [ct, setCt] = useState('');
+  const [tr, setTr] = useState('');
+  const [stats, setStats] = useState({});
+  const [step, setStep] = useState(0);
+  const [err, setErr] = useState('');
+
+  const setS = (id, k, v) => setStats(s => ({ ...s, [id]: { ...(s[id] || {}), [k]: v.replace(/\D/g, '').slice(0, 2) } }));
+
+  function validate(){
+    if(!/^\d{1,2}$/.test(ct) || !/^\d{1,2}$/.test(tr)) return 'Informe os dois placares (números).';
+    const a = Number(ct), b = Number(tr);
+    if(Math.max(a, b) !== 13) return 'Um dos lados precisa ter exatamente 13 rodadas.';
+    if(Math.min(a, b) > 12) return 'O lado perdedor deve ter de 0 a 12.';
+    for(const p of players){
+      const s = stats[p.user_id] || {};
+      const any = s.k || s.d || s.h;
+      if(!any) continue;
+      if(s.k === undefined || s.k === '' || s.d === undefined || s.d === '') return `Preencha kills e deaths de ${p.username} (ou deixe a linha vazia).`;
+      if(Number(s.k) > 60 || Number(s.d) > 60) return `Kills/deaths de ${p.username} acima de 60.`;
+      if(Number(s.h || 0) > Number(s.k)) return `HS de ${p.username} maior que as kills.`;
+    }
+    return '';
+  }
+
+  const winnerSide = ct !== '' && tr !== '' ? (Number(ct) > Number(tr) ? 'CT' : 'TR') : null;
+  const winnerTeam = winnerSide ? ((winnerSide === 'CT') === aCT ? 'A' : 'B') : null;
+
+  async function confirm(){
+    const payload = players.filter(p => stats[p.user_id] && stats[p.user_id].k !== undefined && stats[p.user_id].k !== '' && stats[p.user_id].d !== undefined && stats[p.user_id].d !== '')
+      .map(p => ({ user_id: p.user_id, kills: Number(stats[p.user_id].k), deaths: Number(stats[p.user_id].d), headshots: Number(stats[p.user_id].h || 0) }));
+    const ok = await ctx.act(() => rpc('lancar_placar', { p_match: m.id, p_ct: Number(ct), p_tr: Number(tr), p_a_starts_ct: aCT, p_stats: payload }), 'Placar lançado e MMR distribuído');
+    if(ok) reload();
+  }
+
+  return (
+    <div className="rounded-lg border border-[var(--orange)]/40 bg-[var(--orange)]/5 p-3 space-y-3">
+      <p className="display font-bold text-sm text-[var(--orange)]">Lançar placar</p>
+
+      <div>
+        <p className="text-[11px] text-[var(--dim)] mb-1">Time A começou jogando de:</p>
+        <div className="grid grid-cols-2 gap-2">
+          {[[true,'CT'],[false,'TR']].map(([val, l]) => (
+            <button key={l} onClick={() => { setACT(val); setStep(0); }} aria-pressed={aCT === val}
+              className={"btn py-2 rounded-lg text-xs display font-bold border " + (aCT === val ? "border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent)]" : "border-[var(--line)] text-[var(--dim)]")}>{l}</button>
+          ))}
+        </div>
+        <p className="text-[10px] text-[var(--dim)] mt-1">O Time B começou no lado oposto ({aCT ? 'TR' : 'CT'}).</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px] text-[var(--accent)] display font-bold">Placar CT
+          <input className={INPUT + " mt-1"} inputMode="numeric" value={ct} onChange={e => { setCt(e.target.value.replace(/\D/g, '').slice(0, 2)); setStep(0); }} placeholder="0–13" /></label>
+        <label className="text-[11px] text-[var(--orange)] display font-bold">Placar TR
+          <input className={INPUT + " mt-1"} inputMode="numeric" value={tr} onChange={e => { setTr(e.target.value.replace(/\D/g, '').slice(0, 2)); setStep(0); }} placeholder="0–13" /></label>
+      </div>
+
+      <details>
+        <summary className="cursor-pointer text-xs text-[var(--dim)]">Estatísticas dos jogadores (opcional)</summary>
+        <p className="text-[10px] text-[var(--dim)] my-2">Sem kills/deaths, o jogador recebe o MMR base (K/D neutro). Deixe a linha vazia para pular.</p>
+        <div className="space-y-1.5">
+          {players.map(p => (
+            <div key={p.user_id} className="grid grid-cols-[1fr_52px_52px_52px] gap-1.5 items-center">
+              <span className="text-[11px] truncate">{p.username} <span className="text-[var(--dim)]">T{p.team}</span></span>
+              {['k','d','h'].map(k => (
+                <input key={k} className={INPUT + " px-2 py-1.5 text-center"} inputMode="numeric" placeholder={k === 'k' ? 'K' : k === 'd' ? 'D' : 'HS'}
+                  value={(stats[p.user_id] || {})[k] || ''} onChange={e => { setS(p.user_id, k, e.target.value); setStep(0); }} aria-label={`${k} de ${p.username}`} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </details>
+
+      {err && <p role="alert" className="text-xs text-[var(--red)]">{err}</p>}
+
+      {step === 0 ? (
+        <button className="btn w-full py-2.5 rounded-lg bg-[var(--accent)] text-sm display font-bold"
+          onClick={() => { const e = validate(); setErr(e); if(!e) setStep(1); }}>Revisar placar</button>
+      ) : (
+        <div className="space-y-2">
+          <div className="rounded-lg bg-[#0d1117] border border-[var(--line)] p-3 text-xs">
+            <p>Placar: <b>CT {ct} x {tr} TR</b></p>
+            <p>Time A começou em <b>{aCT ? 'CT' : 'TR'}</b> → vence o <b>Time {winnerTeam}</b>.</p>
+            <p className="text-[var(--dim)] mt-1">Isso atualiza o MMR dos 10 jogadores. Só dá para desfazer por contestação aprovada.</p>
+          </div>
+          <div className="flex gap-2">
+            <button className="btn flex-1 py-2.5 rounded-lg border border-[var(--line)] text-sm" onClick={() => setStep(0)}>Voltar</button>
+            <button disabled={ctx.busy} className="btn flex-1 py-2.5 rounded-lg bg-[var(--green)] text-black text-sm display font-bold flex items-center justify-center gap-2" onClick={confirm}>
+              {ctx.busy && <Spinner size={14} />}Confirmar e distribuir MMR
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ===================== DENÚNCIAS ===================== */
+function Denuncias({ ctx }){
+  const [f, setF] = useState('pendente');
+  const st = useLoad(() => rpc('staff_listar_denuncias', { p_status: f }), [f], 15000);
+  return (
+    <div className="rise space-y-3">
+      <div className="flex gap-1">
+        {[['pendente','Pendentes'],['confirmada','Confirmadas'],['descartada','Descartadas'],['todas','Todas']].map(([id, l]) => (
+          <button key={id} onClick={() => setF(id)} aria-pressed={f === id}
+            className={"btn px-3 py-1.5 rounded-lg text-xs " + (f === id ? "bg-[var(--surface2)] border border-[var(--accent)]" : "border border-[var(--line)] text-[var(--dim)]")}>{l}</button>
+        ))}
+      </div>
+      <Loader st={st}>{list => list.length === 0 ? <Empty>Nenhuma denúncia neste filtro.</Empty> : (
+        <div className="space-y-3">{list.map(r => (
+          <div key={r.id} className="card p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-semibold text-sm">{CATS[r.category] || r.category}</p>
+                <p className="text-xs">Alvo: <b>{r.target}</b> <span className="text-[var(--dim)]">(ID {r.target_sid} · karma {r.target_karma}%)</span></p>
+                <p className="text-[11px] text-[var(--dim)]">Denunciado por {r.reporter} · partida #{short(r.match_id)} · {fmt(r.created_at)}</p>
+              </div>
+              <Badge color={r.status === 'pendente' ? 'var(--orange)' : r.status === 'confirmada' ? 'var(--red)' : 'var(--dim)'}>{r.status}</Badge>
+            </div>
+            {r.status === 'pendente' && (
+              <div className="flex gap-2">
+                <button disabled={ctx.busy} className="btn flex-1 py-2 rounded-lg border border-[var(--red)]/50 text-[var(--red)] text-xs display font-bold"
+                  onClick={async () => { if(await ctx.act(() => rpc('confirmar_denuncia', { p_report: r.id, p_confirm: true }), `Confirmada: −${PENALTY[r.category]} de karma`)) st.reload(); }}>
+                  Confirmar (−{PENALTY[r.category]} karma)
+                </button>
+                <button disabled={ctx.busy} className="btn flex-1 py-2 rounded-lg border border-[var(--line)] text-xs display font-bold"
+                  onClick={async () => { if(await ctx.act(() => rpc('confirmar_denuncia', { p_report: r.id, p_confirm: false }), 'Denúncia descartada')) st.reload(); }}>
+                  Descartar
+                </button>
+              </div>
+            )}
+          </div>
+        ))}</div>
+      )}</Loader>
+    </div>
+  );
+}
+
+/* ===================== CONTESTAÇÕES ===================== */
+function Contestacoes({ ctx }){
+  const [f, setF] = useState('pendente');
+  const st = useLoad(() => rpc('staff_listar_contestacoes', { p_status: f }), [f], 15000);
+  return (
+    <div className="rise space-y-3">
+      <div className="flex gap-1">
+        {[['pendente','Pendentes'],['aprovada','Aprovadas'],['rejeitada','Rejeitadas'],['todas','Todas']].map(([id, l]) => (
+          <button key={id} onClick={() => setF(id)} aria-pressed={f === id}
+            className={"btn px-3 py-1.5 rounded-lg text-xs " + (f === id ? "bg-[var(--surface2)] border border-[var(--accent)]" : "border border-[var(--line)] text-[var(--dim)]")}>{l}</button>
+        ))}
+      </div>
+      <Loader st={st}>{list => list.length === 0 ? <Empty>Nenhuma contestação neste filtro.</Empty> : (
+        <div className="space-y-3">{list.map(d => (
+          <div key={d.id} className="card p-4 space-y-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-semibold text-sm">{d.username} contestou o resultado</p>
+                <p className="text-xs">{MAPS[d.map] || d.map} · CT {d.ct} x {d.tr} TR · vencedor Time {d.winner}</p>
+                <p className="text-[11px] text-[var(--dim)]">Jogador do Time {d.team} · MMR {d.mmr_change > 0 ? '+' : ''}{d.mmr_change} · partida #{short(d.match_id)} ({d.match_status}) · {fmt(d.created_at)}</p>
+              </div>
+              <Badge color={d.status === 'pendente' ? 'var(--orange)' : d.status === 'aprovada' ? 'var(--red)' : 'var(--dim)'}>{d.status}</Badge>
+            </div>
+            {d.status === 'pendente' && ctx.can.act && (
+              <div className="flex gap-2">
+                <button disabled={ctx.busy} className="btn flex-1 py-2 rounded-lg border border-[var(--red)]/50 text-[var(--red)] text-xs display font-bold"
+                  onClick={async () => { if(window.confirm('Aprovar anula a partida e reverte o MMR dos 10 jogadores. Continuar?') && await ctx.act(() => rpc('resolver_contestacao', { p_dispute: d.id, p_approve: true }), 'Partida anulada e MMR revertido')) st.reload(); }}>
+                  Aprovar (anula)
+                </button>
+                <button disabled={ctx.busy} className="btn flex-1 py-2 rounded-lg border border-[var(--green)]/50 text-[var(--green)] text-xs display font-bold"
+                  onClick={async () => { if(await ctx.act(() => rpc('resolver_contestacao', { p_dispute: d.id, p_approve: false }), 'Contestação rejeitada')) st.reload(); }}>
+                  Rejeitar (mantém)
+                </button>
+              </div>
+            )}
+            {d.status === 'pendente' && !ctx.can.act && <p className="text-[11px] text-[var(--dim)]">Somente ADMIN ou OWNER decidem contestações.</p>}
+          </div>
+        ))}</div>
+      )}</Loader>
+    </div>
+  );
+}
+
+/* ===================== JOGADORES ===================== */
+function Jogadores({ ctx }){
+  const [q, setQ] = useState('');
+  const [res, setRes] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function search(term){
+    const t = (term ?? q).trim();
+    if(t.length < 2){ setErr('Digite ao menos 2 caracteres.'); return; }
+    setErr(''); setLoading(true);
+    try{ setRes(await rpc('staff_buscar_jogador', { p_q: t })); }
+    catch(e){ setErr(msg(e)); }
+    finally { setLoading(false); }
+  }
+
+  return (
+    <div className="rise space-y-3">
+      <div className="flex gap-2">
+        <input className={INPUT} value={q} onChange={e => setQ(e.target.value)} placeholder="Usuário ou ID do Standoff 2" maxLength={40}
+          onKeyDown={e => { if(e.key === 'Enter') search(); }} aria-label="Buscar jogador" />
+        <button onClick={() => search()} disabled={loading} className="btn px-4 rounded-lg bg-[var(--accent)] text-sm display font-bold">Buscar</button>
+      </div>
+      {err && <p className="text-xs text-[var(--red)]">{err}</p>}
+      {loading && <div className="flex justify-center py-6"><Spinner /></div>}
+      {res && !loading && (res.length === 0 ? <Empty>Nenhum jogador encontrado.</Empty> : (
+        <div className="space-y-3">{res.map(p => <PlayerCard key={p.id} p={p} ctx={ctx} refresh={() => search(q)} />)}</div>
+      ))}
+    </div>
+  );
+}
+
+function PlayerCard({ p, ctx, refresh }){
+  const { can, act } = ctx;
+  const banned = p.banned_until && new Date(p.banned_until) > new Date();
+  const run = (fn, ok) => async v => { const done = await act(() => fn(v), ok); if(done) refresh(); return done; };
+  const roleColor = { OWNER:'var(--orange)', ADMIN:'var(--accent)', MODERATOR:'var(--green)', USER:'var(--dim)' }[p.role];
+
+  return (
+    <div className="card p-4 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="display font-bold">{p.username}</p>
+          <p className="text-[11px] text-[var(--dim)]">ID Standoff 2: {p.sid} · {p.matches_played} partidas</p>
+          <p className="text-xs mt-1">MMR <b>{p.mmr}</b> · Karma <b style={{color: p.karma >= 50 ? 'var(--green)' : 'var(--red)'}}>{p.karma}%</b></p>
+          {banned && <p className="text-[11px] text-[var(--red)] mt-1">Suspenso até {fmt(p.banned_until)}{p.ban_reason ? ` — ${p.ban_reason}` : ''}</p>}
+        </div>
+        <Badge color={roleColor}>{p.role}</Badge>
+      </div>
+
+      {can.act && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-[var(--accent)]">Ações</summary>
+          <div className="mt-3 space-y-4">
+            <div>
+              <p className="text-[11px] text-[var(--dim)] mb-1">Ajustar MMR (de −300 a +300)</p>
+              <MiniForm label="Aplicar ajuste" fields={[{ key:'delta', label:'Ex.: -50 ou 30', numeric:true, max:5 }, { key:'motivo', label:'Motivo (obrigatório)' }]}
+                onSubmit={run(v => rpc('ajustar_mmr', { p_user: p.id, p_delta: parseInt(v.delta, 10), p_motivo: v.motivo }), 'MMR ajustado')} />
+            </div>
+            <div>
+              <p className="text-[11px] text-[var(--dim)] mb-1">Definir karma (0 a 100)</p>
+              <MiniForm label="Definir karma" fields={[{ key:'valor', label:'Novo karma', numeric:true, max:3 }, { key:'motivo', label:'Motivo (obrigatório)' }]}
+                onSubmit={run(v => rpc('ajustar_karma', { p_user: p.id, p_valor: parseInt(v.valor, 10), p_motivo: v.motivo }), 'Karma atualizado')} />
+            </div>
+            <div>
+              <p className="text-[11px] text-[var(--dim)] mb-1">Suspender conta</p>
+              <MiniForm label="Suspender" danger
+                fields={[{ key:'horas', default:'24', options:[['24','24 horas'],['72','3 dias'],['168','7 dias'],['720','30 dias'],['87600','Permanente']] }, { key:'motivo', label:'Motivo (obrigatório)' }]}
+                onSubmit={run(v => rpc('banir_jogador', { p_user: p.id, p_horas: parseInt(v.horas, 10), p_motivo: v.motivo }), 'Conta suspensa')} />
+            </div>
+            {banned && (
+              <div>
+                <p className="text-[11px] text-[var(--dim)] mb-1">Remover suspensão</p>
+                <MiniForm label="Remover suspensão" fields={[{ key:'motivo', label:'Motivo (obrigatório)' }]}
+                  onSubmit={run(v => rpc('desbanir_jogador', { p_user: p.id, p_motivo: v.motivo }), 'Suspensão removida')} />
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+
+      {can.owner && p.role !== 'OWNER' && (
+        <details className="text-xs">
+          <summary className="cursor-pointer text-[var(--orange)]">Cargo (somente OWNER)</summary>
+          <div className="mt-3">
+            <MiniForm label="Definir cargo" fields={[{ key:'role', default:p.role, options:[['USER','Jogador'],['MODERATOR','Moderador'],['ADMIN','Administrador']] }]}
+              onSubmit={run(v => rpc('set_role', { p_user: p.id, p_role: v.role }), 'Cargo atualizado')} />
+          </div>
+        </details>
+      )}
+      {!can.act && <p className="text-[11px] text-[var(--dim)]">Somente leitura para o seu cargo.</p>}
+    </div>
+  );
+}
+
+/* ===================== EQUIPE ===================== */
+function Equipe({ ctx }){
+  const st = useLoad(() => rpc('staff_listar_equipe'), [], 0);
+  const roleColor = { OWNER:'var(--orange)', ADMIN:'var(--accent)', MODERATOR:'var(--green)' };
+  return (
+    <div className="rise space-y-3">
+      <div className="card p-4 text-xs text-[var(--dim)] space-y-1">
+        <p><b className="text-[var(--green)]">MODERATOR</b>: vê tudo e analisa denúncias.</p>
+        <p><b className="text-[var(--accent)]">ADMIN</b>: + libera sala, lança placar, decide contestações, ajusta MMR/karma e suspende.</p>
+        <p><b className="text-[var(--orange)]">OWNER</b>: + promove e rebaixa cargos (aba Jogadores → buscar → Cargo).</p>
+      </div>
+      <Loader st={st}>{list => (
+        <div className="space-y-2">{list.map(m => (
+          <div key={m.id} className="card px-4 py-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold truncate">{m.username}</p>
+              <p className="text-[11px] text-[var(--dim)]">ID {m.sid} · desde {fmt(m.created_at)}</p>
+            </div>
+            <Badge color={roleColor[m.role]}>{m.role}</Badge>
+          </div>
+        ))}</div>
+      )}</Loader>
+    </div>
+  );
+}
+
+/* ===================== REGISTRO ===================== */
+function Registro(){
+  const st = useLoad(() => rpc('staff_log_listar', { p_limit: 100 }), [], 20000);
+  return (
+    <div className="rise space-y-3">
+      <p className="text-[11px] text-[var(--dim)]">Últimas 100 ações da equipe. Não pode ser editado pelo painel.</p>
+      <Loader st={st}>{list => list.length === 0 ? <Empty>Nenhuma ação registrada ainda.</Empty> : (
+        <ul className="space-y-2">{list.map(l => (
+          <li key={l.id} className="card px-3 py-2.5">
+            <div className="flex justify-between gap-2 text-xs">
+              <span><b>{l.staff_name || 'conta removida'}</b> · <span className="text-[var(--accent)]">{l.action}</span></span>
+              <span className="text-[var(--dim)] whitespace-nowrap">{fmt(l.created_at)}</span>
+            </div>
+            <p className="text-[11px] text-[var(--dim)] break-all mt-1">alvo: {l.target ? short(l.target) : '—'} · {l.details ? JSON.stringify(l.details) : ''}</p>
+          </li>
+        ))}</ul>
+      )}</Loader>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="S02 CompClub — competitivo 5v5 de Standoff 2 com ranking, MMR e fair play.">
+<title>S02 CompClub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+  :root{
+    --bg:#0d1117; --surface:#161b22; --surface2:#1c2330; --line:#30363d;
+    --text:#e6edf3; --dim:#8b949e; --accent:#2f81f7; --orange:#f0883e;
+    --green:#3fb950; --red:#f85149;
+    color-scheme: dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;margin:0;
+    -webkit-tap-highlight-color:transparent;}
+  .display{font-family:'Rajdhani','Inter',sans-serif;letter-spacing:.02em}
+  ::-webkit-scrollbar{display:none}
+  .noscroll{-ms-overflow-style:none;scrollbar-width:none}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+  .btn{transition:transform .08s,opacity .2s}
+  .btn:active{transform:scale(.97)}
+  .btn:disabled{opacity:.4}
+  .hex{clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%)}
+  @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .rise{animation:rise .3s ease-out both}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .spin{animation:spin .8s linear infinite}
+  .safe-top{padding-top:env(safe-area-inset-top,0px)}
+  .safe-bottom{padding-bottom:env(safe-area-inset-bottom,0px)}
+</style>
+</head>
+<body>
+<div id="root"><p style="padding:40px;text-align:center;color:#8b949e;font-family:sans-serif">Carregando…</p></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ===================== CONFIGURAÇÃO =====================
+   Só a chave PUBLICÁVEL (anon) fica aqui. Ela é pública por design:
+   a segurança está nas políticas RLS e nas funções do banco. */
+const SB_URL = "https://ncvjrgjasllevthjyibi.supabase.co";
+const SB_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5jdmpyZ2phc2xsZXZ0aGp5aWJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0MjQ2NjgsImV4cCI6MjEwOTAwMDY2OH0._lq7kIUU_UzF7GCyIgvacBB6BEVHjSmXaTg2SdbTsUg";
+const CONTACT_EMAIL = "[E-MAIL DE SUPORTE]";
+const COMPANY = "[NOME DO RESPONSÁVEL / EMPRESA]";
+const sb = window.supabase.createClient(SB_URL, SB_ANON, { auth: { persistSession: true, autoRefreshToken: true } });
+
+/* ===================== CONSTANTES ===================== */
+const EMAIL_DOMAIN = "contas.s02faceit.com"; // e-mail interno do login (não recebe mensagens)
+const emailFor = u => `${u.trim().toLowerCase()}@${EMAIL_DOMAIN}`;
+const MAPS = { sandstone:'Sandstone', rust:'Rust', province:'Province', breeze:'Breeze', prison:'Prison', dune:'Dune', hanami:'Hanami' };
+const CATS = { toxic:'Toxidade', cheat:'Uso de Cheat/Hack', afk:'Ausente/AFK', noroom:'Não entrou na sala' };
+const USER_RE = /^[A-Za-z0-9_]{3,16}$/;
+const SID_RE = /^\d{7,9}$/;
+const PHONE_RE = /^[1-9]{2}(?:9\d{8}|[2-5]\d{7})$/;
+const IMG_TYPES = { 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' };
+
+const INPUT = "w-full bg-[#0d1117] border border-[var(--line)] rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[var(--accent)]";
+
+/* ===================== REGRAS (só exibição; o banco valida de novo) ===================== */
+function mmrToLevel(mmr){
+  const t=[0,400,800,1200,1600,2000,2350,2650,2900,3100]; let l=1;
+  for(let i=0;i<t.length;i++){ if(mmr>=t[i]) l=i+1; }
+  return Math.min(l,10);
+}
+function friendly(err){
+  const m = (err && err.message) || String(err);
+  if(/profiles_sid_key/.test(m)) return 'Este ID do Standoff 2 já está cadastrado.';
+  if(/profiles_phone_key/.test(m)) return 'Este telefone já está cadastrado.';
+  if(/profiles_username_key/.test(m)) return 'Este usuário já existe.';
+  if(/already registered|already been registered|User already/i.test(m)) return 'Este usuário já existe.';
+  if(/Invalid login credentials/i.test(m)) return 'Usuário ou senha inválidos.';
+  if(/Database error saving new user/i.test(m)) return 'Não foi possível criar a conta. Confira os dados: usuário, telefone e ID do Standoff 2 devem ser válidos e ainda não cadastrados.';
+  if(/Failed to fetch/i.test(m)) return 'Sem conexão com o servidor. Tente novamente.';
+  if(/email address/i.test(m) && /invalid/i.test(m)) return 'Não foi possível criar o acesso. Fale com o suporte.';
+  return m;
+}
+function unwrap(r){ if(r.error) throw r.error; return r.data; }
+
+/* ===================== COMPONENTES BASE ===================== */
+function Avatar({ name, url, size = 40 }){
+  const [broken, setBroken] = useState(false);
+  const style = { width:size, height:size };
+  if(url && !broken){
+    return <img src={url} alt="" onError={()=>setBroken(true)} style={style}
+      className="rounded-full object-cover flex-shrink-0 border border-[var(--line)]" />;
+  }
+  return (
+    <div style={style} className="rounded-full bg-[#1c2330] border border-[var(--line)] flex items-center justify-center display font-bold flex-shrink-0 text-[var(--dim)]"
+      aria-hidden="true">{(name||'?').slice(0,1).toUpperCase()}</div>
+  );
+}
+
+function LevelBadge({ calibrated, level, calCount }){
+  return (
+    <div className="hex w-11 h-12 flex items-center justify-center flex-shrink-0"
+      style={{ background: calibrated ? 'linear-gradient(160deg,#f0883e,#8a4312)' : '#30363d' }}
+      title={calibrated ? `Level ${level}` : `Calibragem ${calCount}/10`}>
+      <span className="display font-bold text-base" style={{color: calibrated ? '#0d1117' : '#e6edf3'}}>
+        {calibrated ? level : `${calCount}/10`}
+      </span>
+    </div>
+  );
+}
+
+function Spinner({ size = 18 }){
+  return <div style={{width:size,height:size}} className="spin rounded-full border-2 border-[var(--line)] border-t-[var(--accent)]" />;
+}
+
+function Toasts({ toasts }){
+  const c = { info:'var(--accent)', success:'var(--green)', error:'var(--red)', warn:'var(--orange)' };
+  return (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] w-[92%] max-w-sm space-y-2 pointer-events-none" aria-live="polite">
+      {toasts.map(t => (
+        <div key={t.id} className="rise card px-3.5 py-2.5 text-sm shadow-lg" style={{borderColor:c[t.type]}}>{t.msg}</div>
+      ))}
+    </div>
+  );
+}
+
+/* ===================== DOCUMENTOS LEGAIS ===================== */
+const LEGAL = {
+  termos: { title:'Termos de Uso', body: [
+    ['1. Aceitação', `Ao criar uma conta ou usar o S02 CompClub você concorda com estes Termos. Se não concordar, não use a plataforma. Operador: ${COMPANY}.`],
+    ['2. Conta', 'Você é responsável pelo seu usuário, senha e pelas informações fornecidas. Informe dados verdadeiros: o ID do Standoff 2 precisa ser o seu. Uma pessoa pode manter apenas uma conta.'],
+    ['3. Regras de fair play', 'É proibido usar cheats, hacks, scripts, exploits ou qualquer ferramenta que dê vantagem injusta; manipular placar, resultado ou fila; combinar resultados; ofender, ameaçar ou assediar outros jogadores; abandonar partidas de propósito (AFK) ou não entrar na sala.'],
+    ['4. Anti-cheat e sanções', 'Denúncias são analisadas pela equipe. Denúncias confirmadas reduzem o karma; karma abaixo de 50% bloqueia a busca por partidas. Infrações graves (como cheats) podem levar à suspensão temporária ou banimento permanente, sem direito a reembolso de nenhum valor.'],
+    ['5. Resultados e MMR', 'Placares e MMR são lançados pela equipe com base na partida. Você pode contestar um resultado pela aba Perfil; a decisão da equipe é final.'],
+    ['6. Conteúdo', 'Sua foto de perfil não pode conter nudez, violência, ódio, símbolos ofensivos ou direitos de terceiros.'],
+    ['7. Disponibilidade', 'O serviço é oferecido "como está". Podemos alterar, suspender ou encerrar funções a qualquer momento, com aviso razoável quando possível.'],
+    ['8. Alterações', 'Podemos atualizar estes Termos. Mudanças relevantes serão avisadas no app.'],
+    ['9. Contato', `Dúvidas: ${CONTACT_EMAIL}.`],
+  ]},
+  privacidade: { title:'Política de Privacidade', body: [
+    ['1. Quem trata os dados', `${COMPANY} é o controlador dos dados pessoais tratados nesta plataforma, nos termos da LGPD (Lei 13.709/2018).`],
+    ['2. Dados coletados', 'Usuário, senha (armazenada apenas de forma criptografada pelo serviço de autenticação), telefone, ID do Standoff 2, foto de perfil (opcional) e dados de partidas: vitórias, derrotas, MMR, K/D, headshots, mapas e denúncias.'],
+    ['3. Finalidades', 'Criar e manter sua conta, organizar partidas, calcular ranking e MMR, prevenir fraudes e cheats, atender denúncias e contestações e cumprir obrigações legais.'],
+    ['4. Bases legais', 'Execução do contrato (uso da plataforma), legítimo interesse (segurança e combate a fraudes) e consentimento, quando você aceita a foto de perfil ou esta política no cadastro.'],
+    ['5. Exibição pública', 'Seu usuário, foto, MMR, nível, vitórias e derrotas aparecem no ranking público. Telefone e ID do Standoff 2 são privados e não são exibidos a outros usuários.'],
+    ['6. Armazenamento', 'Os dados são guardados no Supabase, com acesso restrito por regras de segurança no banco. Fotos ficam em um bucket de armazenamento acessível por link público.'],
+    ['7. Compartilhamento', 'Não vendemos seus dados. Podemos compartilhar informações com provedores de infraestrutura (hospedagem e banco de dados) e com autoridades quando exigido por lei.'],
+    ['8. Seus direitos', `Você pode pedir confirmação, acesso, correção, anonimização, portabilidade ou exclusão dos seus dados, e revogar consentimentos. Envie a solicitação para ${CONTACT_EMAIL}. Respondemos no prazo legal.`],
+    ['9. Retenção', 'Mantemos os dados enquanto a conta existir e pelo prazo necessário para cumprir obrigações legais e prevenir fraudes.'],
+    ['10. Segurança', 'Usamos criptografia em trânsito, senhas tratadas pelo serviço de autenticação e controle de acesso por linha no banco. Nenhum sistema é totalmente imune a falhas; avisaremos em caso de incidente relevante.'],
+    ['11. Contato', `Encarregado de dados: ${CONTACT_EMAIL}.`],
+  ]},
+  ajuda: { title:'Central de Ajuda', body: [
+    ['Como buscar uma partida', 'Vá em Jogar e toque em "Buscar partida". Quando 10 jogadores estiverem na fila, a partida é montada com times equilibrados por MMR e um mapa sorteado.'],
+    ['Como entrar na sala', 'Quando a equipe liberar a sala, o botão "Entrar na sala" aparece na aba Partida. Ao terminar a partida no jogo, toque em "Encerrar partida" para enviar o resultado à equipe.'],
+    ['Como contestar um resultado', 'Vá em Perfil, abra o histórico e toque em "Contestar" na partida. A equipe revisa e decide. Enquanto a contestação estiver pendente, você não pode buscar nova partida.'],
+    ['Como denunciar um jogador', 'Na aba Partida, toque em "Denunciar" ao lado do jogador e escolha o motivo. Denúncias são analisadas pela equipe e podem reduzir o karma de quem infringiu as regras.'],
+    ['Por que não consigo buscar partida?', 'Verifique se seu karma está acima de 50%, se você já tem uma partida ativa ou se há uma contestação pendente.'],
+    ['Suporte', `Fale com a equipe em ${CONTACT_EMAIL}. Informe seu usuário e o ID do Standoff 2 para agilizar o atendimento.`],
+  ]},
+};
+
+function LegalModal({ doc, onClose }){
+  const ref = useRef(null);
+  useEffect(() => {
+    const onKey = e => { if(e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    ref.current && ref.current.focus();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const d = LEGAL[doc];
+  return (
+    <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center px-3 py-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-labelledby="legal-title"
+        className="card w-full max-w-md max-h-[85vh] flex flex-col rise" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-[var(--line)]">
+          <h2 id="legal-title" className="display font-bold text-xl">{d.title}</h2>
+          <button ref={ref} onClick={onClose} aria-label="Fechar" className="btn text-[var(--dim)] text-2xl leading-none px-2">×</button>
+        </div>
+        <div className="overflow-y-auto noscroll px-5 py-4 space-y-4 text-sm text-[var(--dim)] leading-relaxed">
+          {d.body.map(([h, t]) => (
+            <section key={h}>
+              <h3 className="text-[var(--text)] font-semibold mb-1">{h}</h3>
+              <p>{t}</p>
+            </section>
+          ))}
+          <p className="text-[11px] pt-2">Última atualização: 31/10/2026. Este texto é um modelo; revise com um profissional jurídico antes de operar comercialmente.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== LOGIN / CADASTRO ===================== */
+function AuthScreen({ onOpenLegal }){
+  const [mode, setMode] = useState('login');
+  const [f, setF] = useState({ username:'', password:'', phone:'', sid:'', terms:false });
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const set = k => e => { const v = e.target.type === 'checkbox' ? e.target.checked : e.target.value; setF(p => ({...p, [k]: v})); };
+
+  const canSubmit = mode === 'login'
+    ? !!(f.username && f.password)
+    : !!(f.username && f.password && f.phone && f.sid && f.terms);
+
+  async function submit(){
+    setErr('');
+    const u = f.username.trim();
+    setBusy(true);
+    try{
+      if(mode === 'login'){
+        const { error } = await sb.auth.signInWithPassword({ email: emailFor(u), password: f.password });
+        if(error) throw error;
+      } else {
+        if(!USER_RE.test(u)) throw new Error('Usuário: 3 a 16 caracteres (letras, números e _).');
+        if(f.password.length < 6) throw new Error('Senha: mínimo de 6 caracteres.');
+        const phone = f.phone.replace(/\D/g,'');
+        const phoneOk = PHONE_RE.test(phone) || (/^55/.test(phone) && PHONE_RE.test(phone.slice(2)));
+        if(!phoneOk) throw new Error('Telefone inválido: informe DDD + número.');
+        if(!SID_RE.test(f.sid.trim())) throw new Error('ID do Standoff 2: somente números, de 7 a 9 dígitos.');
+        const { data, error } = await sb.auth.signUp({
+          email: emailFor(u), password: f.password,
+          options: { data: { username: u, phone, sid: f.sid.trim() } },
+        });
+        if(error) throw error;
+        if(!data.session) throw new Error('A confirmação de e-mail está ativa no Supabase. Desative-a (veja o README).');
+      }
+    } catch(e){ setErr(friendly(e)); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 safe-top safe-bottom">
+      <div className="w-full max-w-sm rise">
+        <div className="text-center mb-6">
+          <div className="hex w-14 h-16 mx-auto flex items-center justify-center mb-3" style={{background:'linear-gradient(160deg,#2f81f7,#1b3f7a)'}}>
+            <span className="display font-bold text-2xl">S</span>
+          </div>
+          <h1 className="display font-bold text-2xl">S02 CompClub</h1>
+          <p className="text-[var(--dim)] text-xs mt-1">Competitivo 5v5 de Standoff 2</p>
+        </div>
+
+        <div className="card p-5">
+          <div className="grid grid-cols-2 gap-1 bg-[#0d1117] rounded-lg p-1 mb-4" role="tablist">
+            {[['login','Entrar'],['register','Criar conta']].map(([id,l]) => (
+              <button key={id} role="tab" aria-selected={mode===id} onClick={() => { setMode(id); setErr(''); }}
+                className={"btn py-2 rounded-md text-xs display font-bold " + (mode===id ? "bg-[var(--accent)] text-white" : "text-[var(--dim)]")}>{l}</button>
+            ))}
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-[11px] text-[var(--dim)] uppercase tracking-wide">Usuário
+              <input className={INPUT + " mt-1"} value={f.username} onChange={set('username')} maxLength={16}
+                autoCapitalize="none" autoComplete="username" placeholder="seu_usuario" />
+            </label>
+            <label className="block text-[11px] text-[var(--dim)] uppercase tracking-wide">Senha
+              <input className={INPUT + " mt-1"} type="password" value={f.password} onChange={set('password')} maxLength={72}
+                autoComplete={mode==='login' ? 'current-password' : 'new-password'} placeholder="••••••" />
+            </label>
+            {mode === 'register' && (
+              <>
+                <label className="block text-[11px] text-[var(--dim)] uppercase tracking-wide">Telefone (privado)
+                  <input className={INPUT + " mt-1"} type="tel" inputMode="tel" value={f.phone} onChange={set('phone')} maxLength={20} placeholder="DDD + número" />
+                </label>
+                <label className="block text-[11px] text-[var(--dim)] uppercase tracking-wide">ID do Standoff 2 (privado)
+                  <input className={INPUT + " mt-1"} inputMode="numeric" value={f.sid} onChange={set('sid')} maxLength={9} placeholder="7 a 9 números" />
+                </label>
+                <label className="flex gap-2 items-start text-xs text-[var(--dim)] pt-1">
+                  <input type="checkbox" checked={f.terms} onChange={set('terms')} className="mt-0.5 accent-[var(--accent)]" />
+                  <span>Li e aceito os <button type="button" className="underline text-[var(--text)]" onClick={() => onOpenLegal('termos')}>Termos de Uso</button> e a <button type="button" className="underline text-[var(--text)]" onClick={() => onOpenLegal('privacidade')}>Política de Privacidade</button>.</span>
+                </label>
+              </>
+            )}
+          </div>
+
+          {err && <p role="alert" className="text-xs text-[var(--red)] mt-3">{err}</p>}
+
+          <button onClick={submit} disabled={!canSubmit || busy}
+            className="btn w-full mt-5 py-2.5 rounded-lg bg-[var(--accent)] display font-bold flex items-center justify-center gap-2">
+            {busy && <Spinner size={14} />}{mode === 'login' ? 'Entrar' : 'Criar conta'}
+          </button>
+        </div>
+
+        <Footer onOpenLegal={onOpenLegal} />
+      </div>
+    </div>
+  );
+}
+
+function Footer({ onOpenLegal }){
+  return (
+    <footer className="mt-6 text-center text-[11px] text-[var(--dim)] space-x-3">
+      <button className="underline" onClick={() => onOpenLegal('termos')}>Termos</button>
+      <span aria-hidden="true">·</span>
+      <button className="underline" onClick={() => onOpenLegal('privacidade')}>Privacidade</button>
+      <span aria-hidden="true">·</span>
+      <button className="underline" onClick={() => onOpenLegal('ajuda')}>Ajuda</button>
+    </footer>
+  );
+}
+
+/* ===================== APP ===================== */
+function App(){
+  const [session, setSession] = useState(undefined); // undefined = verificando
+  const [profile, setProfile] = useState(null);
+  const [sit, setSit] = useState(null);
+  const [tab, setTab] = useState('jogar');
+  const [toasts, setToasts] = useState([]);
+  const [legal, setLegal] = useState(null);
+  const [reportCtx, setReportCtx] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const prevMatch = useRef(null);
+
+  const notify = (msg, type = 'info') => {
+    const id = Date.now() + Math.random();
+    setToasts(t => [...t, { id, msg, type }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3500);
+  };
+
+  useEffect(() => {
+    sb.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: sub } = sb.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if(!session) return;
+    try{
+      const [p, s] = await Promise.all([
+        sb.from('profiles').select('*').eq('id', session.user.id).single(),
+        sb.rpc('minha_situacao'),
+      ]);
+      if(p.data) setProfile(p.data);
+      if(!s.error && s.data){
+        setSit(s.data);
+        const id = s.data.partida ? s.data.partida.id : null;
+        if(id && id !== prevMatch.current){ notify('Partida encontrada! Veja a sala.', 'success'); setTab('partida'); }
+        prevMatch.current = id;
+      }
+    } catch(e){ /* falhas de rede transitórias: tenta de novo no próximo ciclo */ }
+  }, [session]);
+
+  useEffect(() => {
+    if(!session){ setProfile(null); setSit(null); return; }
+    refresh();
+    const t = setInterval(refresh, 5000);
+    return () => clearInterval(t);
+  }, [session, refresh]);
+
+  async function act(fn, okMsg){
+    setBusy(true);
+    try{
+      const r = await fn();
+      if(okMsg) notify(okMsg, 'success');
+      await refresh();
+      return r;
+    } catch(e){ notify(friendly(e), 'error'); }
+    finally { setBusy(false); }
+  }
+
+  async function logout(){
+    await sb.auth.signOut();
+    prevMatch.current = null;
+    setTab('jogar');
+  }
+
+  if(session === undefined){
+    return <div className="min-h-screen flex items-center justify-center"><Spinner size={28} /></div>;
+  }
+  if(!session){
+    return (
+      <>
+        <Toasts toasts={toasts} />
+        <AuthScreen onOpenLegal={setLegal} />
+        {legal && <LegalModal doc={legal} onClose={() => setLegal(null)} />}
+      </>
+    );
+  }
+  if(!profile){
+    return <div className="min-h-screen flex items-center justify-center"><Spinner size={28} /></div>;
+  }
+
+  const calCount = Math.min(10, profile.matches_played);
+  const calibrated = profile.matches_played >= 10;
+  const level = mmrToLevel(profile.mmr);
+  const banned = !!(profile.banned_until && new Date(profile.banned_until) > new Date());
+  const blocked = profile.karma < 50 || banned;
+
+  return (
+    <div className="min-h-screen max-w-md mx-auto flex flex-col relative safe-top">
+      <Toasts toasts={toasts} />
+      <header className="sticky top-0 z-20 bg-[#0d1117]/95 backdrop-blur border-b border-[var(--line)] px-4 py-3 flex items-center gap-3">
+        <Avatar name={profile.username} url={profile.avatar_url} size={38} />
+        <div className="min-w-0 flex-1">
+          <p className="display font-bold truncate leading-tight">{profile.username}</p>
+          <p className="text-[11px] text-[var(--dim)]">{profile.mmr} MMR · karma {profile.karma}%</p>
+        </div>
+        <LevelBadge calibrated={calibrated} level={level} calCount={calCount} />
+      </header>
+
+      <main className="flex-1 overflow-y-auto noscroll px-4 pt-4 pb-28">
+        {tab === 'jogar' && <Lobby profile={profile} sit={sit} blocked={blocked} banned={banned} busy={busy}
+          onQueue={() => act(() => sb.rpc('entrar_fila').then(unwrap), null)}
+          onLeave={() => act(() => sb.rpc('sair_fila').then(unwrap), 'Você saiu da fila')} />}
+        {tab === 'partida' && <Partida sit={sit} profile={profile} busy={busy}
+          onEnterRoom={link => window.open(link, '_blank')}
+          onEnd={id => act(() => sb.rpc('encerrar_partida', { p_match:id }).then(unwrap), 'Partida encerrada. Aguardando o placar da equipe.')}
+          onReport={(targets, match) => setReportCtx({ targets, match })} />}
+        {tab === 'perfil' && <Perfil profile={profile} session={session} busy={busy} setBusy={setBusy}
+          notify={notify} refresh={refresh}
+          onContest={id => act(() => sb.rpc('contestar_resultado', { p_match:id }).then(unwrap), 'Contestação enviada à equipe')}
+          onOpenLegal={setLegal} onLogout={logout} />}
+        {tab === 'ranking' && <Ranking me={profile.id} />}
+      </main>
+
+      <nav className="fixed bottom-0 left-0 right-0 z-20 max-w-md mx-auto bg-[#0d1117]/95 backdrop-blur border-t border-[var(--line)] safe-bottom" aria-label="Navegação principal">
+        <div className="grid grid-cols-4">
+          {[['jogar','Jogar','⚔'],['partida','Partida','▦'],['perfil','Perfil','◉'],['ranking','Ranking','▲']].map(([id,l,i]) => (
+            <button key={id} onClick={() => setTab(id)} aria-current={tab===id ? 'page' : undefined}
+              className={"btn relative flex flex-col items-center gap-1 py-2.5 " + (tab===id ? "text-[var(--accent)]" : "text-[var(--dim)]")}>
+              <span className="text-lg leading-none">{i}</span>
+              <span className="text-[10px] display font-semibold">{l}</span>
+              {id==='partida' && sit && sit.partida && <span className="absolute top-2 right-[30%] w-1.5 h-1.5 rounded-full bg-[var(--orange)]" />}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {reportCtx && <ReportModal ctx={reportCtx} busy={busy} onClose={() => setReportCtx(null)}
+        onSubmit={(target, category) => act(
+          () => sb.rpc('denunciar', { p_target: target, p_category: category, p_match: reportCtx.match }).then(unwrap),
+          'Denúncia enviada para análise'
+        ).then(() => setReportCtx(null))} />}
+      {legal && <LegalModal doc={legal} onClose={() => setLegal(null)} />}
+    </div>
+  );
+}
+
+/* ===================== JOGAR ===================== */
+function Lobby({ profile, sit, blocked, banned, busy, onQueue, onLeave }){
+  const inQueue = !!(sit && sit.na_fila);
+  const inMatch = !!(sit && sit.partida);
+  const calibrated = profile.matches_played >= 10;
+  const pct = Math.min(10, profile.matches_played);
+  return (
+    <div className="rise space-y-4">
+      <div className="card p-5">
+        <p className="text-[11px] text-[var(--dim)] uppercase tracking-wide">Modo</p>
+        <h2 className="display font-bold text-2xl">Competitivo 5v5</h2>
+        <p className="text-xs text-[var(--dim)] mt-1">Partidas com jogadores reais. Times equilibrados por MMR.</p>
+
+        {blocked && (
+          <div className="mt-4 rounded-lg border border-[var(--red)]/50 bg-[var(--red)]/10 p-3 text-xs">
+            <p className="font-semibold text-[var(--red)]">{banned ? 'Conta suspensa' : 'Busca bloqueada'}</p>
+            <p className="text-[var(--dim)] mt-1">{banned
+              ? `Suspensa até ${new Date(profile.banned_until).toLocaleString('pt-BR')}${profile.ban_reason ? ' — motivo: ' + profile.ban_reason : ''}.`
+              : `Seu karma está em ${profile.karma}%. A busca volta a funcionar com karma de 50% ou mais.`}</p>
+          </div>
+        )}
+
+        <div className="mt-5">
+          {inMatch ? (
+            <p className="text-sm text-[var(--dim)]">Você já está em uma partida. Veja a aba Partida.</p>
+          ) : inQueue ? (
+            <div className="flex items-center gap-3">
+              <Spinner size={20} />
+              <div className="flex-1">
+                <p className="text-sm font-semibold">Procurando partida…</p>
+                <p className="text-[11px] text-[var(--dim)]">A partida começa quando 10 jogadores entram na fila.</p>
+              </div>
+              <button onClick={onLeave} disabled={busy} className="btn text-xs text-[var(--dim)] underline">Sair</button>
+            </div>
+          ) : (
+            <button onClick={onQueue} disabled={blocked || busy}
+              className="btn w-full py-3.5 rounded-xl bg-[var(--accent)] display font-bold text-lg flex items-center justify-center gap-2">
+              {busy && <Spinner size={16} />}Buscar partida
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-3">
+          <p className="display font-bold">Calibragem MD10</p>
+          <p className="text-xs text-[var(--dim)]">{calibrated ? 'Concluída' : `${pct}/10 partidas`}</p>
+        </div>
+        <div className="grid grid-cols-10 gap-1" role="progressbar" aria-valuemin={0} aria-valuemax={10} aria-valuenow={pct}>
+          {Array.from({length:10}).map((_,i) => (
+            <div key={i} className="h-2 rounded-sm" style={{background: i < pct ? 'var(--orange)' : '#30363d'}} />
+          ))}
+        </div>
+        <p className="text-[11px] text-[var(--dim)] mt-3">
+          {calibrated ? 'Seu Level está liberado.' : 'O Level é liberado após 10 partidas. Até lá, seu MMR já conta normalmente.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ===================== PARTIDA ===================== */
+function Partida({ sit, profile, busy, onEnterRoom, onEnd, onReport }){
+  const m = sit && sit.partida;
+  if(!m){
+    return (
+      <div className="rise card p-6 text-center mt-6">
+        <p className="display font-bold text-lg">Nenhuma partida ativa</p>
+        <p className="text-xs text-[var(--dim)] mt-1">Quando uma partida for formada, ela aparece aqui.</p>
+      </div>
+    );
+  }
+  const teamA = m.jogadores.filter(j => j.team === 'A');
+  const teamB = m.jogadores.filter(j => j.team === 'B');
+  const statusInfo = {
+    aguardando_sala: ['Aguardando a sala', 'A equipe está preparando o link da sala.'],
+    sala_liberada: ['Sala liberada', 'Entre na sala, jogue e encerre aqui quando terminar.'],
+    aguardando_placar: ['Aguardando placar', 'A equipe está lançando o resultado.'],
+  }[m.status] || ['Partida', ''];
+
+  return (
+    <div className="rise space-y-4">
+      <div className="card p-5">
+        <div className="flex items-center justify-between">
+          <p className="display font-bold text-lg">{statusInfo[0]}</p>
+          <span className="text-[11px] text-[var(--dim)]">Mapa: <span className="text-[var(--text)]">{MAPS[m.map] || m.map}</span></span>
+        </div>
+        <p className="text-xs text-[var(--dim)] mt-1">{statusInfo[1]}</p>
+
+        {m.status === 'sala_liberada' && (
+          <div className="mt-4 space-y-2">
+            <button onClick={() => onEnterRoom(m.room_link)} className="btn w-full py-3.5 rounded-xl bg-[var(--orange)] text-black display font-bold text-lg">
+              Entrar na sala
+            </button>
+            <button onClick={() => onEnd(m.id)} disabled={busy} className="btn w-full py-2.5 rounded-lg border border-[var(--line)] text-sm">
+              Encerrar partida
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <TeamList title="Time A" players={teamA} color="var(--accent)" onReport={p => onReport(m.jogadores.filter(x => !x.is_me).map(x => x.id), m.id)} />
+        <TeamList title="Time B" players={teamB} color="var(--orange)" onReport={p => onReport(m.jogadores.filter(x => !x.is_me).map(x => x.id), m.id)} />
+      </div>
+
+      <button onClick={() => onReport(m.jogadores.filter(x => !x.is_me).map(x => x.id), m.id)}
+        className="btn w-full py-2.5 rounded-lg border border-[var(--red)]/40 text-[var(--red)] text-sm display font-semibold">
+        Denunciar jogador
+      </button>
+    </div>
+  );
+}
+
+function TeamList({ title, players, color, onReport }){
+  return (
+    <div className="card p-3">
+      <p className="display font-bold text-sm mb-2" style={{color}}>{title}</p>
+      <ul className="space-y-2">
+        {players.map(p => (
+          <li key={p.id} className="flex items-center gap-2">
+            <Avatar name={p.username} url={p.avatar_url} size={26} />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold truncate">{p.username}{p.is_me ? ' (você)' : ''}</p>
+              <p className="text-[10px] text-[var(--dim)]">{p.mmr} MMR</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ReportModal({ ctx, busy, onClose, onSubmit }){
+  const [target, setTarget] = useState('');
+  const [cat, setCat] = useState('');
+  return (
+    <div className="fixed inset-0 z-50 bg-black/75 flex items-end sm:items-center justify-center px-3 py-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-labelledby="rep-title" className="card w-full max-w-md p-5 rise" onClick={e => e.stopPropagation()}>
+        <h2 id="rep-title" className="display font-bold text-lg mb-1">Denunciar jogador</h2>
+        <p className="text-[11px] text-[var(--dim)] mb-4">Só é possível denunciar jogadores da sua partida. A denúncia é analisada pela equipe.</p>
+        <p className="text-[11px] uppercase tracking-wide text-[var(--dim)] mb-2">Jogador</p>
+        <ReportTargets ids={ctx.targets} selected={target} onSelect={setTarget} />
+        <p className="text-[11px] uppercase tracking-wide text-[var(--dim)] mt-4 mb-2">Motivo</p>
+        <div className="grid grid-cols-2 gap-2 mb-5">
+          {Object.entries(CATS).map(([k,l]) => (
+            <button key={k} onClick={() => setCat(k)} aria-pressed={cat===k}
+              className={"btn py-2.5 rounded-lg text-xs font-semibold border " + (cat===k ? "border-[var(--red)] text-[var(--red)] bg-[var(--red)]/10" : "border-[var(--line)]")}>{l}</button>
+          ))}
+        </div>
+        <div className="flex gap-2.5">
+          <button onClick={onClose} className="btn flex-1 py-2.5 rounded-lg border border-[var(--line)] text-sm">Cancelar</button>
+          <button onClick={() => onSubmit(target, cat)} disabled={!target || !cat || busy}
+            className="btn flex-1 py-2.5 rounded-lg bg-[var(--red)] text-white text-sm display font-bold disabled:opacity-40">Enviar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ReportTargets({ ids, selected, onSelect }){
+  const [names, setNames] = useState({});
+  useEffect(() => {
+    if(!ids.length) return;
+    sb.from('ranking').select('id,username').in('id', ids).then(({ data }) => {
+      const map = {}; (data || []).forEach(r => { map[r.id] = r.username; }); setNames(map);
+    });
+  }, [ids.join(',')]);
+  return (
+    <div className="flex flex-wrap gap-2">
+      {ids.map(id => (
+        <button key={id} onClick={() => onSelect(id)} aria-pressed={selected===id}
+          className={"btn px-3 py-1.5 rounded-full text-xs font-semibold border " + (selected===id ? "border-[var(--red)] text-[var(--red)] bg-[var(--red)]/10" : "border-[var(--line)]")}>
+          {names[id] || 'Jogador'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ===================== PERFIL ===================== */
+function Perfil({ profile, session, busy, setBusy, notify, refresh, onContest, onOpenLegal, onLogout }){
+  const [history, setHistory] = useState(null);
+  const fileRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    sb.from('match_players')
+      .select('match_id,team,kills,deaths,headshots,mmr_change,matches(id,status,map,ct_score,tr_score,winner_team,team_a_starts_ct,finished_at)')
+      .eq('user_id', profile.id)
+      .then(({ data, error }) => {
+        if(error) return;
+        const rows = (data || []).filter(r => r.matches && ['finalizada','anulada'].includes(r.matches.status));
+        rows.sort((a,b) => new Date(b.matches.finished_at) - new Date(a.matches.finished_at));
+        setHistory(rows);
+      });
+  }, [profile.id, profile.matches_played]);
+
+  const stats = (() => {
+    const h = history || [];
+    const played = h.filter(r => r.matches.status === 'finalizada');
+    const wins = played.filter(r => r.matches.winner_team === r.team).length;
+    const kills = played.reduce((a,r) => a + (r.kills||0), 0);
+    const deaths = played.reduce((a,r) => a + (r.deaths||0), 0);
+    const hs = played.reduce((a,r) => a + (r.headshots||0), 0);
+    const withKills = played.filter(r => r.kills !== null);
+    return {
+      games: played.length,
+      winrate: played.length ? Math.round(wins/played.length*100) : null,
+      kd: deaths ? (kills/deaths).toFixed(2) : (withKills.length ? kills.toFixed(2) : '—'),
+      hs: kills ? Math.round(hs/kills*100) + '%' : '—',
+    };
+  })();
+
+  const byMap = Object.keys(MAPS).map(id => {
+    const g = (history || []).filter(r => r.matches.status === 'finalizada' && r.matches.map === id);
+    const w = g.filter(r => r.matches.winner_team === r.team).length;
+    return { id, name: MAPS[id], games: g.length, pct: g.length ? Math.round(w/g.length*100) : null };
+  });
+
+  const last10 = (history || []).slice(0,10).reverse().filter(r => r.mmr_change !== null);
+
+  async function onFile(e){
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if(!file) return;
+    if(!IMG_TYPES[file.type]) return notify('Formato inválido: use JPG, PNG ou WEBP', 'error');
+    if(file.size > 2 * 1024 * 1024) return notify('Imagem acima de 2 MB', 'error');
+    setUploading(true);
+    try{
+      const name = `${profile.id}/${Date.now()}-${Math.random().toString(36).slice(2,10)}.${IMG_TYPES[file.type]}`;
+      const { error: upErr } = await sb.storage.from('avatars').upload(name, file, { contentType: file.type, upsert: false });
+      if(upErr) throw upErr;
+      const { data } = sb.storage.from('avatars').getPublicUrl(name);
+      const { error: dbErr } = await sb.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', profile.id);
+      if(dbErr) throw dbErr;
+      notify('Foto atualizada', 'success');
+      await refresh();
+    } catch(err){ notify('Não foi possível enviar a foto: ' + (err.message || err), 'error'); }
+    finally { setUploading(false); }
+  }
+
+  const karmaColor = profile.karma >= 50 ? 'var(--green)' : 'var(--red)';
+  return (
+    <div className="rise space-y-4">
+      <div className="card p-5 flex items-center gap-4">
+        <div className="relative">
+          <Avatar name={profile.username} url={profile.avatar_url} size={72} />
+          {uploading && <div className="absolute inset-0 rounded-full bg-black/60 flex items-center justify-center"><Spinner size={22} /></div>}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="display font-bold text-xl truncate">{profile.username}</p>
+          <p className="text-[11px] text-[var(--dim)]">ID Standoff 2: {profile.sid}</p>
+          <button onClick={() => fileRef.current && fileRef.current.click()} disabled={uploading}
+            className="btn mt-2 text-xs px-3 py-1.5 rounded-lg border border-[var(--line)]">Trocar foto</button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onFile} aria-label="Escolher foto de perfil" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-2">
+        <Stat label="MMR" value={profile.mmr} />
+        <Stat label="K/D" value={stats.kd} />
+        <Stat label="Winrate" value={stats.winrate === null ? '—' : stats.winrate + '%'} />
+        <Stat label="HS%" value={stats.hs} />
+      </div>
+
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="display font-semibold">Karma</p>
+          <p className="display font-bold" style={{color:karmaColor}}>{profile.karma}%</p>
+        </div>
+        <div className="w-full h-1.5 rounded-full bg-[#30363d] overflow-hidden">
+          <div className="h-full rounded-full" style={{width:profile.karma+'%', background:karmaColor}} />
+        </div>
+        <p className="text-[11px] text-[var(--dim)] mt-2">Abaixo de 50% a busca por partidas fica bloqueada.</p>
+      </div>
+
+      <div className="card p-4">
+        <p className="display font-semibold mb-3">Últimas partidas (MMR)</p>
+        {last10.length === 0 ? <p className="text-xs text-[var(--dim)]">Nenhuma partida finalizada ainda.</p> : (
+          <div className="flex items-end gap-1.5 h-24" role="img" aria-label="Variação de MMR das últimas partidas">
+            {last10.map((r,i) => {
+              const v = r.mmr_change; const max = 80;
+              return <div key={i} className="flex-1 h-full flex flex-col justify-end">
+                <div className="w-full rounded-t" style={{height: Math.max(4, Math.abs(v)/max*100)+'%', background: v>=0 ? 'var(--green)' : 'var(--red)'}} title={String(v)} />
+              </div>;
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="card p-4">
+        <p className="display font-semibold mb-3">Winrate por mapa</p>
+        <div className="space-y-2.5">
+          {byMap.map(m => (
+            <div key={m.id}>
+              <div className="flex justify-between text-xs mb-1"><span>{m.name}</span><span className="text-[var(--dim)]">{m.games ? `${m.pct}% · ${m.games} jogos` : 'sem partidas'}</span></div>
+              <div className="w-full h-1 rounded-full bg-[#30363d] overflow-hidden"><div className="h-full bg-[var(--accent)]" style={{width:(m.pct||0)+'%'}} /></div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <p className="display font-semibold text-sm text-[var(--dim)] uppercase tracking-wide mb-2">Histórico</p>
+        {history === null ? <Spinner /> : history.length === 0 ? (
+          <div className="card p-6 text-center text-xs text-[var(--dim)]">Suas partidas aparecerão aqui.</div>
+        ) : (
+          <ul className="space-y-2">
+            {history.map(r => {
+              const won = r.matches.winner_team === r.team;
+              const anulada = r.matches.status === 'anulada';
+              return (
+                <li key={r.match_id} className="card px-3 py-2.5 flex items-center gap-3">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{background: anulada ? 'var(--dim)' : won ? 'var(--green)' : 'var(--red)'}} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">{anulada ? 'Anulada' : won ? 'Vitória' : 'Derrota'} · {MAPS[r.matches.map] || r.matches.map}</p>
+                    <p className="text-[11px] text-[var(--dim)]">CT {r.matches.ct_score} x {r.matches.tr_score} TR{r.kills !== null ? ` · K ${r.kills} D ${r.deaths}` : ''}</p>
+                  </div>
+                  {!anulada && r.mmr_change !== null && (
+                    <span className="display font-bold text-sm" style={{color: r.mmr_change>0 ? 'var(--green)' : 'var(--red)'}}>{r.mmr_change>0?'+':''}{r.mmr_change}</span>
+                  )}
+                  {!anulada && <button onClick={() => onContest(r.match_id)} disabled={busy} className="btn text-[11px] underline text-[var(--dim)]">Contestar</button>}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      <div className="space-y-2 pt-2">
+        <button onClick={() => onOpenLegal('ajuda')} className="btn w-full py-2.5 rounded-lg border border-[var(--line)] text-sm">Central de ajuda</button>
+        <button onClick={() => onOpenLegal('termos')} className="btn w-full py-2.5 rounded-lg border border-[var(--line)] text-sm">Termos de Uso</button>
+        <button onClick={() => onOpenLegal('privacidade')} className="btn w-full py-2.5 rounded-lg border border-[var(--line)] text-sm">Política de Privacidade</button>
+        <button onClick={onLogout} className="btn w-full py-2.5 rounded-lg text-[var(--dim)] text-sm">Sair da conta</button>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }){
+  return (
+    <div className="card py-3 text-center">
+      <p className="display font-bold text-base">{value}</p>
+      <p className="text-[9px] text-[var(--dim)] uppercase tracking-wide mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+/* ===================== RANKING ===================== */
+function Ranking({ me }){
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    sb.from('ranking').select('id,username,avatar_url,mmr,matches_played,wins,losses,role')
+      .order('mmr', { ascending:false }).limit(50)
+      .then(({ data, error }) => setRows(error ? [] : data));
+  }, []);
+  if(rows === null) return <div className="flex justify-center pt-10"><Spinner /></div>;
+  return (
+    <div className="rise">
+      <h2 className="display font-bold text-2xl mb-4">Ranking</h2>
+      {rows.length === 0 ? <div className="card p-6 text-center text-xs text-[var(--dim)]">Ainda não há jogadores.</div> : (
+        <ol className="space-y-2">
+          {rows.map((p,i) => (
+            <li key={p.id} className={"card px-3 py-3 flex items-center gap-3 " + (p.id===me ? "border-[var(--accent)]" : "")}>
+              <span className="display font-bold w-6 text-center text-[var(--dim)]">{i+1}</span>
+              <Avatar name={p.username} url={p.avatar_url} size={34} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold truncate">{p.username}{p.id===me ? ' (você)' : ''}{p.role==='OWNER' || p.role==='ADMIN' || p.role==='MODERATOR' ? <span className="ml-1.5 text-[9px] display px-1 rounded bg-[var(--accent)]/20 text-[var(--accent)]">{p.role}</span> : null}</p>
+                <p className="text-[11px] text-[var(--dim)]">{p.wins}V · {p.losses}D</p>
+              </div>
+              <div className="text-right">
+                <p className="display font-bold">{p.mmr}</p>
+                <p className="text-[10px] text-[var(--dim)]">{p.matches_played >= 10 ? 'Lvl ' + mmrToLevel(p.mmr) : `MD10 ${p.matches_played}/10`}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
